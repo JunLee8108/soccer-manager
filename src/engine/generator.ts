@@ -1,0 +1,329 @@
+import { CLUB_SEEDS, type ClubSeed } from './data/clubs'
+import { BLOCKED_NAMES, FOREIGN, GIVEN_NAMES, SURNAMES } from './data/names'
+import { autoLineup } from './lineup'
+import { ovrAt, POSITION_WEIGHTS, wageFor } from './ratings'
+import { clamp, Rng } from './rng'
+import { doubleRoundRobin } from './schedule'
+import type {
+  AttrKey,
+  Attributes,
+  Club,
+  DefLine,
+  FormationId,
+  GameState,
+  Objective,
+  Player,
+  Position,
+  Press,
+  SeasonStats,
+  Style,
+} from './types'
+import { ATTR_KEYS } from './types'
+
+export const SAVE_VERSION = 1
+
+const GK_ONLY: AttrKey[] = ['handling', 'reflexes', 'oneOnOne']
+const OUTFIELD_SKILLS: AttrKey[] = ['finishing', 'dribbling', 'tackling', 'marking', 'heading', 'firstTouch']
+
+/** Squad template: position and quality offset relative to the club level. */
+const SQUAD_TEMPLATE: [Position, number][] = [
+  ['GK', 2], ['GK', -5], ['GK', -11],
+  ['CB', 2], ['CB', 1], ['CB', -4], ['CB', -8],
+  ['LB', 1], ['LB', -6],
+  ['RB', 1], ['RB', -6],
+  ['DM', 1], ['DM', -4],
+  ['CM', 2], ['CM', 1], ['CM', -5],
+  ['AM', 0],
+  ['LW', 1], ['LW', -6],
+  ['RW', 1], ['RW', -6],
+  ['ST', 2], ['ST', -3], ['ST', -9],
+]
+
+const SECONDARY: Record<Position, Position[]> = {
+  GK: [],
+  CB: ['DM', 'RB', 'LB'],
+  LB: ['LW', 'RB', 'CB'],
+  RB: ['RW', 'LB', 'CB'],
+  DM: ['CM', 'CB'],
+  CM: ['DM', 'AM'],
+  AM: ['CM', 'ST', 'LW', 'RW'],
+  LW: ['RW', 'AM', 'ST'],
+  RW: ['LW', 'AM', 'ST'],
+  ST: ['AM', 'LW', 'RW'],
+}
+
+export const emptyStats = (): SeasonStats => ({
+  apps: 0,
+  starts: 0,
+  goals: 0,
+  assists: 0,
+  ratingSum: 0,
+  rated: 0,
+  yellows: 0,
+  reds: 0,
+  motm: 0,
+  cleanSheets: 0,
+})
+
+export function generateAttributes(rng: Rng, pos: Position, target: number, age: number): Attributes {
+  const w = POSITION_WEIGHTS[pos]
+  const maxW = Math.max(...Object.values(w).map((x) => x ?? 0))
+  const base = target / 5
+  const attrs = {} as Attributes
+  for (const k of ATTR_KEYS) {
+    const imp = (w[k] ?? 0) / maxW
+    let mean: number
+    if (GK_ONLY.includes(k) && pos !== 'GK') mean = rng.range(2, 6)
+    else if (pos === 'GK' && OUTFIELD_SKILLS.includes(k)) mean = base * 0.38
+    else mean = base * (0.64 + 0.36 * imp)
+    let v = mean + rng.normal(1.5)
+    if ((k === 'pace' || k === 'acceleration') && age > 29) v -= (age - 29) * 0.45
+    if ((k === 'pace' || k === 'acceleration') && age < 21) v += 0.6
+    if ((k === 'composure' || k === 'decisions' || k === 'positioning') && age < 22) v -= (22 - age) * 0.45
+    if ((k === 'composure' || k === 'decisions') && age > 28) v += 0.7
+    attrs[k] = clamp(Math.round(v), 1, 20)
+  }
+  // Nudge the position-relevant attributes until the overall rating hits the target.
+  for (let iter = 0; iter < 10; iter++) {
+    const diff = target - ovrAt(attrs, pos)
+    if (Math.abs(diff) <= 1) break
+    const step = diff / 5
+    for (const key in w) {
+      const k = key as AttrKey
+      const delta = Math.round(step + rng.normal(0.35))
+      attrs[k] = clamp(attrs[k] + (delta === 0 ? Math.sign(diff) : delta), 1, 20)
+    }
+  }
+  return attrs
+}
+
+function potentialFor(rng: Rng, current: number, age: number): number {
+  let room = 0
+  if (age <= 18) room = rng.range(8, 26)
+  else if (age <= 21) room = rng.range(4, 18)
+  else if (age <= 24) room = rng.range(1, 10)
+  else if (age <= 27) room = rng.range(0, 4)
+  return clamp(Math.round(current + room), current, 94)
+}
+
+function ageFor(rng: Rng, offset: number): number {
+  if (offset <= -7) return rng.int(17, 20)
+  if (offset <= -4) return rng.int(19, 30)
+  // Triangular-ish around 26.
+  return clamp(Math.round(20 + rng.next() * 7 + rng.next() * 7), 19, 34)
+}
+
+class NameFactory {
+  used = new Set<string>()
+  rng: Rng
+
+  constructor(rng: Rng) {
+    this.rng = rng
+  }
+
+  korean(): string {
+    const weights = SURNAMES.map(([, w]) => w)
+    for (let i = 0; i < 50; i++) {
+      const name = SURNAMES[this.rng.weighted(weights)][0] + this.rng.pick(GIVEN_NAMES)
+      if (!this.used.has(name) && !BLOCKED_NAMES.has(name)) {
+        this.used.add(name)
+        return name
+      }
+    }
+    return SURNAMES[0][0] + this.rng.pick(GIVEN_NAMES) + this.used.size
+  }
+
+  foreign(code: string): string {
+    const pool = FOREIGN[code]
+    for (let i = 0; i < 50; i++) {
+      const first = this.rng.pick(pool.first)
+      const last = this.rng.pick(pool.last)
+      const name = code === 'JPN' ? `${last} ${first}` : `${first} ${last}`
+      if (!this.used.has(name)) {
+        this.used.add(name)
+        return name
+      }
+    }
+    return `${this.rng.pick(pool.first)} ${this.rng.pick(pool.last)}`
+  }
+}
+
+function heightFor(rng: Rng, pos: Position): number {
+  if (pos === 'GK') return rng.int(184, 197)
+  if (pos === 'CB') return rng.int(182, 194)
+  if (pos === 'ST') return rng.int(176, 192)
+  return rng.int(168, 186)
+}
+
+function footFor(rng: Rng, pos: Position): Player['foot'] {
+  const r = rng.next()
+  if (r < 0.06) return 'B'
+  const leftBias = pos === 'LB' || pos === 'LW' ? 0.55 : 0.18
+  return rng.next() < leftBias ? 'L' : 'R'
+}
+
+const STANDARD_SHIRTS: Partial<Record<Position, number[]>> = {
+  GK: [1],
+  RB: [2],
+  LB: [3],
+  CB: [4, 5],
+  DM: [6],
+  RW: [7],
+  CM: [8, 10],
+  ST: [9],
+  AM: [10],
+  LW: [11],
+}
+
+export function clubLevel(reputation: number): number {
+  return 44 + reputation * 0.36
+}
+
+export function generateSquad(
+  rng: Rng,
+  seed: ClubSeed,
+  names: NameFactory,
+  nextId: () => string,
+  season: number,
+): Player[] {
+  const level = clubLevel(seed.reputation)
+  const players: Player[] = []
+  const takenShirts = new Set<number>()
+  const groupIndex: Partial<Record<Position, number>> = {}
+
+  for (const [pos, offset] of SQUAD_TEMPLATE) {
+    const idx = groupIndex[pos] ?? 0
+    groupIndex[pos] = idx + 1
+    const age = ageFor(rng, offset)
+    const target = clamp(Math.round(level + offset + rng.normal(2.6)), 38, 90)
+    const attrs = generateAttributes(rng, pos, target, age)
+    const current = ovrAt(attrs, pos)
+    const foreign = rng.chance(0.11)
+    const nationality = foreign ? rng.pick(Object.keys(FOREIGN)) : 'KOR'
+    const name = foreign ? names.foreign(nationality) : names.korean()
+    const secondaryCount = rng.weighted([0.35, 0.45, 0.2])
+    const secondary = rng.shuffle([...SECONDARY[pos]]).slice(0, secondaryCount)
+
+    let shirt = idx === 0 ? (STANDARD_SHIRTS[pos] ?? []).find((n) => !takenShirts.has(n)) : undefined
+    if (!shirt) {
+      do shirt = rng.int(12, 40)
+      while (takenShirts.has(shirt))
+    }
+    takenShirts.add(shirt)
+
+    players.push({
+      id: nextId(),
+      name,
+      nationality,
+      age,
+      position: pos,
+      secondary,
+      foot: footFor(rng, pos),
+      height: heightFor(rng, pos),
+      attrs,
+      potential: potentialFor(rng, current, age),
+      condition: rng.int(90, 100),
+      morale: rng.int(60, 78),
+      injury: null,
+      suspension: 0,
+      yellowAccum: 0,
+      contract: { wage: wageFor(current, age), until: season + rng.int(0, 3) },
+      clubId: seed.id,
+      shirt,
+      stats: emptyStats(),
+      history: [current],
+    })
+  }
+  return players
+}
+
+function aiTactics(rng: Rng, reputation: number): { formation: FormationId; style: Style; press: Press; line: DefLine } {
+  const formations: FormationId[] = ['4-3-3', '4-4-2', '4-2-3-1', '4-1-4-1', '3-5-2', '5-3-2']
+  const formation = formations[rng.weighted([3, 3, 3, 1.5, 1.2, reputation < 62 ? 1.5 : 0.5])]
+  const strong = reputation >= 70
+  const style: Style = (['possession', 'balanced', 'counter'] as Style[])[rng.weighted(strong ? [3, 2, 1] : [1, 2, 3])]
+  const press: Press = (['low', 'mid', 'high'] as Press[])[rng.weighted(strong ? [1, 2, 2] : [2, 2, 1])]
+  const line: DefLine = (['deep', 'normal', 'high'] as DefLine[])[rng.weighted(strong ? [1, 2, 2] : [2, 2, 1])]
+  return { formation, style, press, line }
+}
+
+export function objectiveFor(reputationRank: number): Objective {
+  if (reputationRank <= 3) return { targetRank: 2, label: '우승 경쟁 (2위 이내)' }
+  if (reputationRank <= 7) return { targetRank: 4, label: '대륙컵 진출 (4위 이내)' }
+  if (reputationRank <= 11) return { targetRank: 8, label: '중위권 (8위 이내)' }
+  return { targetRank: 13, label: '1부 잔류 (13위 이내)' }
+}
+
+export interface NewGameOptions {
+  seed: number
+  userClubId: string
+  managerName?: string
+}
+
+export function createNewGame({ seed, userClubId, managerName = '감독' }: NewGameOptions): GameState {
+  const rng = new Rng(seed)
+  const names = new NameFactory(rng)
+  let counter = 1
+  const nextId = () => `p${counter++}`
+  const season = 1
+
+  const clubs: Record<string, Club> = {}
+  const players: Record<string, Player> = {}
+
+  for (const seedClub of CLUB_SEEDS) {
+    const squad = generateSquad(rng, seedClub, names, nextId, season)
+    for (const p of squad) players[p.id] = p
+    const isUser = seedClub.id === userClubId
+    const t = isUser
+      ? { formation: '4-3-3' as FormationId, style: 'balanced' as Style, press: 'mid' as Press, line: 'normal' as DefLine }
+      : aiTactics(rng, seedClub.reputation)
+    const club: Club = {
+      ...seedClub,
+      budget: Math.round((100000 + (seedClub.reputation - 50) * 12000) / 1000) * 1000,
+      playerIds: squad.map((p) => p.id),
+      tactics: { ...t, lineup: [], bench: [] },
+      training: { focus: 'tactics', intensity: 'normal' },
+    }
+    const { lineup, bench } = autoLineup(club, players)
+    club.tactics.lineup = lineup
+    club.tactics.bench = bench
+    clubs[club.id] = club
+  }
+
+  const clubOrder = CLUB_SEEDS.map((c) => c.id)
+  const repRank = [...CLUB_SEEDS].sort((a, b) => b.reputation - a.reputation).findIndex((c) => c.id === userClubId) + 1
+  const objective = objectiveFor(repRank)
+  const user = clubs[userClubId]
+  const now = Date.now()
+
+  return {
+    version: SAVE_VERSION,
+    seed,
+    rng: rng.state,
+    season,
+    round: 0,
+    userClubId,
+    clubs,
+    clubOrder,
+    players,
+    fixtures: doubleRoundRobin(clubOrder, rng, season),
+    inbox: [
+      {
+        id: 'm1',
+        season,
+        round: 0,
+        tag: 'board',
+        title: `${user.name}에 오신 것을 환영합니다`,
+        body: `이사회의 이번 시즌 목표는 '${objective.label}'입니다. 선수단을 파악하고 첫 경기를 준비해 주세요.`,
+        read: false,
+      },
+    ],
+    objective,
+    history: [],
+    lastReport: null,
+    nextId: counter,
+    managerName,
+    createdAt: now,
+    updatedAt: now,
+  }
+}

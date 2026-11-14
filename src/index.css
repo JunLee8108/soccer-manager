@@ -1,0 +1,115 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0b1220;
+  --color-surface: #131c2e;
+  --color-surface-2: #1b2740;
+  --color-line: #24324d;
+  --color-line-soft: #1f2b43;
+  --color-nav: #0e1626;
+  --color-active: #2e3f5e;
+  --color-ink: #e8edf5;
+  --color-ink-2: #c5cedd;
+  --color-muted: #8c9ab3;
+  --color-faint: #4b5a75;
+  --color-accent: #a3e635;
+  --color-accent-hi: #bef264;
+  --color-away: #60a5fa;
+  --color-warn: #fb923c;
+  --color-caution: #facc15;
+  --color-gk: #fbbf24;
+  --color-fw: #f472b6;
+  --color-pitch: #14331f;
+  --color-pitch-2: #173a23;
+  --color-pitch-line: #1e4a2d;
+
+  --font-sans: "IBM Plex Sans KR", system-ui, -apple-system, sans-serif;
+  --font-display: "Barlow Condensed", "IBM Plex Sans KR", sans-serif;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: #05080f;
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: none;
+  }
+
+  button {
+    cursor: pointer;
+    font-family: inherit;
+  }
+
+  button:disabled {
+    cursor: default;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+}
+
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@utility pb-safe {
+  padding-bottom: max(env(safe-area-inset-bottom), 12px);
+}
+
+@utility pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.animate-sheet-up {
+  animation: sheet-up 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.animate-fade-in {
+  animation: fade-in 180ms ease-out;
+}
+
+.animate-live {
+  animation: live-pulse 1.4s ease-in-out infinite;
+}
