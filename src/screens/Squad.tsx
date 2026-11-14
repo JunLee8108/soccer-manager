@@ -21,7 +21,8 @@ export function playerFlag(game: GameState, p: Player): { label: string; cls: st
   return null
 }
 
-export function roleOf(game: GameState, p: Player): '선발' | '교체' | '명단 외' {
+export function roleOf(game: GameState, p: Player): '선발' | '교체' | '명단 외' | '유스' {
+  if (game.clubs[p.clubId].youthIds.includes(p.id)) return '유스'
   const t = game.clubs[p.clubId].tactics
   if (t.lineup.includes(p.id)) return '선발'
   if (t.bench.includes(p.id)) return '교체'
@@ -83,6 +84,9 @@ export function SquadScreen({ game }: { game: GameState }) {
             </button>
           )
         })}
+        <a href={href('club/youth')} className="flex h-9 shrink-0 items-center rounded-full border border-dashed border-line px-3.5 text-[13px] font-semibold text-ink-2 no-underline">
+          유스 {club.youthIds.length} →
+        </a>
       </div>
 
       <div className="grid h-7 shrink-0 items-center gap-2.5 border-b border-line-soft px-4 text-[11px] text-muted" style={{ gridTemplateColumns: '40px minmax(0,1fr) 56px 50px' }}>
@@ -119,7 +123,15 @@ export function SquadScreen({ game }: { game: GameState }) {
                 <ConditionBar value={p.condition} />
               </span>
               <span className="flex flex-col items-end gap-0.5">
-                <span className="font-display text-[24px] leading-none font-bold">{ovr(p)}</span>
+                <span className="flex items-baseline gap-1">
+                  {ovr(p) !== p.history[0] && (
+                    <span className={cx('font-display text-[11px] font-bold', ovr(p) > p.history[0] ? 'text-accent' : 'text-warn')}>
+                      {ovr(p) > p.history[0] ? '+' : ''}
+                      {ovr(p) - p.history[0]}
+                    </span>
+                  )}
+                  <span className="font-display text-[24px] leading-none font-bold">{ovr(p)}</span>
+                </span>
                 <Stars n={potentialStars(p.potential)} className="text-[10px] tracking-[1px]" />
               </span>
             </a>

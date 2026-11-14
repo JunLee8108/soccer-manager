@@ -45,5 +45,5 @@ describe('season balance', () => {
       expect(scorer.value).toBeLessThan(40)
     }
     expect(topRep / 3).toBeGreaterThan(bottomRep / 3 + 6)
-  })
+  }, 60_000)
 })

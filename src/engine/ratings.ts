@@ -157,12 +157,12 @@ export function radar(p: Player): RadarAxis[] {
   const r = (n: number) => Math.round(n)
   if (p.position === 'GK') {
     return [
-      { label: '핸들링', value: a.handling },
-      { label: '반사신경', value: a.reflexes },
-      { label: '일대일', value: a.oneOnOne },
+      { label: '핸들링', value: r(a.handling) },
+      { label: '반사신경', value: r(a.reflexes) },
+      { label: '일대일', value: r(a.oneOnOne) },
       { label: '공중볼', value: r((a.jumping + a.strength) / 2) },
       { label: '배급', value: r((a.passing + a.vision) / 2) },
-      { label: '위치선정', value: a.positioning },
+      { label: '위치선정', value: r(a.positioning) },
     ]
   }
   return [

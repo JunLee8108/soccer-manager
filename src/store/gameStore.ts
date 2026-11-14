@@ -1,11 +1,14 @@
 import { create } from 'zustand'
 import { FORMATIONS } from '../engine/data/formations'
 import { createNewGame } from '../engine/generator'
+import { migrateGame } from '../engine/migrate'
+import { promoteYouth, removePlayer } from '../engine/offseason'
+import { Rng } from '../engine/rng'
 import { BENCH_SIZE, isAvailable, refitLineup, autoLineup } from '../engine/lineup'
 import { setInstructions, simulateToEnd, stepMinute, substitute } from '../engine/match/engine'
 import type { LiveMatch } from '../engine/match/types'
 import { completeRound, isSeasonOver, startNewSeason, startUserMatch } from '../engine/season'
-import type { FormationId, GameState, Instructions, Intensity, TrainingFocus } from '../engine/types'
+import type { ContractDecision, FormationId, GameState, IndividualFocus, Instructions, Intensity, TrainingFocus } from '../engine/types'
 import { createSaveRepository, lastSlot, rememberSlot, type SaveMeta } from './persistence'
 
 export type Speed = 1 | 2 | 4
@@ -39,6 +42,9 @@ interface GameStore {
   setTraining(t: Partial<{ focus: TrainingFocus; intensity: Intensity }>): void
   markRead(id: string): void
   markAllRead(): void
+  setPlayerFocus(playerId: string, focus: IndividualFocus): void
+  promoteYouth(playerId: string): void
+  releaseYouth(playerId: string): void
 
   ensureMatch(): void
   tick(): void
@@ -48,7 +54,7 @@ interface GameStore {
   matchSub(outId: string, inId: string): boolean
   matchInstructions(ins: Partial<Instructions>): void
   finishMatch(): Promise<void>
-  beginNextSeason(): Promise<void>
+  beginNextSeason(decisions: Record<string, ContractDecision>): Promise<void>
 }
 
 const repo = createSaveRepository()
@@ -100,7 +106,7 @@ export const useGame = create<GameStore>((set, get) => {
         const last = lastSlot()
         if (last !== null && saves.some((s) => s.slot === last)) {
           const game = await repo.load(last)
-          if (game) set({ game, slot: last })
+          if (game) set({ game: migrateGame(game), slot: last })
         }
       } catch (err) {
         console.error('Could not read saves', err)
@@ -127,7 +133,7 @@ export const useGame = create<GameStore>((set, get) => {
       const game = await repo.load(slot)
       if (!game) return
       rememberSlot(slot)
-      set({ game, slot, match: null, halfTimeSeen: false, paused: false })
+      set({ game: migrateGame(game), slot, match: null, halfTimeSeen: false, paused: false })
     },
 
     async deleteSave(slot) {
@@ -215,6 +221,27 @@ export const useGame = create<GameStore>((set, get) => {
       })
     },
 
+    setPlayerFocus(playerId, focus) {
+      updateUserClub((game) => {
+        const p = game.players[playerId]
+        if (p && p.clubId === game.userClubId) p.trainingFocus = focus
+      })
+    },
+
+    promoteYouth(playerId) {
+      updateUserClub((game) => {
+        if (game.players[playerId]?.clubId !== game.userClubId) return
+        promoteYouth(game, playerId, new Rng(game.nextId * 7919 + game.round))
+      })
+    },
+
+    releaseYouth(playerId) {
+      updateUserClub((game) => {
+        const club = game.clubs[game.userClubId]
+        if (club.youthIds.includes(playerId)) removePlayer(game, playerId)
+      })
+    },
+
     ensureMatch() {
       const { game, match } = get()
       if (!game || isSeasonOver(game)) return
@@ -279,10 +306,10 @@ export const useGame = create<GameStore>((set, get) => {
       set({ busy: false })
     },
 
-    async beginNextSeason() {
+    async beginNextSeason(decisions) {
       const { game } = get()
       if (!game || !isSeasonOver(game)) return
-      set({ game: startNewSeason(game) })
+      set({ game: startNewSeason(game, decisions) })
       await persist(get, true)
       await get().refreshSaves()
     },

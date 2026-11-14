@@ -72,7 +72,7 @@ export function HomeScreen({ game }: { game: GameState }) {
 
       <main className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 pt-1 pb-3">
         {over ? (
-          <Card label="시즌 종료" className="flex flex-col gap-3 p-4">
+          <Card label="시즌 종료" className="flex shrink-0 flex-col gap-3 p-4">
             <span className="text-[12px] font-bold tracking-wide text-accent">시즌 {game.season} 종료</span>
             <div className="text-[20px] font-bold">최종 {rank}위 · 승점 {myRow.points}</div>
             <p className="m-0 text-[13px] leading-relaxed text-muted">
@@ -85,7 +85,7 @@ export function HomeScreen({ game }: { game: GameState }) {
         ) : (
           fixture &&
           opp && (
-            <Card label="다음 경기" className="flex flex-col gap-3.5 p-4">
+            <Card label="다음 경기" className="flex shrink-0 flex-col gap-3.5 p-4">
               <div className="flex items-center justify-between">
                 <span className="text-[12px] font-bold tracking-wide text-accent">다음 경기 · {fixture.round + 1}라운드</span>
                 <span className="text-[12px] text-muted">{isHome ? '홈 경기' : '원정 경기'}</span>

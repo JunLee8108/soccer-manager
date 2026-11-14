@@ -8,7 +8,7 @@ export type Route =
   | { name: 'match' }
   | { name: 'report' }
   | { name: 'league' }
-  | { name: 'club' }
+  | { name: 'club'; tab?: string }
   | { name: 'inbox' }
   | { name: 'season' }
 
@@ -28,7 +28,7 @@ export function parseHash(hash: string): Route {
     case 'league':
       return { name: 'league' }
     case 'club':
-      return { name: 'club' }
+      return { name: 'club', tab: parts[1] }
     case 'inbox':
       return { name: 'inbox' }
     case 'season':

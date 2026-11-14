@@ -101,7 +101,15 @@ export interface Player {
   stats: SeasonStats
   /** Overall rating snapshot per played round, for the growth chart. */
   history: number[]
+  /** Hidden personality trait (1–20): how well the player converts training into growth. */
+  professionalism: number
+  /** Individual training programme. */
+  trainingFocus: IndividualFocus
+  /** Attribute values at the start of the season, to show this season's changes. */
+  seasonStart: Attributes
 }
+
+export type IndividualFocus = 'balanced' | 'shooting' | 'playmaking' | 'dribbling' | 'defending' | 'physical' | 'mental' | 'goalkeeping'
 
 export type Style = 'possession' | 'balanced' | 'counter'
 export type Press = 'low' | 'mid' | 'high'
@@ -136,7 +144,11 @@ export interface Club {
   capacity: number
   /** In 만원. */
   budget: number
+  /** First-team squad. */
   playerIds: string[]
+  /** Youth academy players (not selectable for matches). */
+  youthIds: string[]
+  facilities: { training: number; youth: number }
   tactics: Tactics
   training: { focus: TrainingFocus; intensity: Intensity }
 }
@@ -198,8 +210,11 @@ export interface SeasonRecord {
   points: number
   championId: string
   topScorerId: string | null
+  topScorerName?: string
   topScorerGoals: number
 }
+
+export type ContractDecision = 'renew' | 'release'
 
 export interface GameState {
   version: number

@@ -1,3 +1,5 @@
+import type { AttrKey } from './types'
+
 /** Whether the last Hangul syllable has a final consonant (받침). */
 export function hasBatchim(word: string): boolean {
   const last = word.trim().slice(-1)
@@ -62,6 +64,30 @@ export const POSITION_LABEL: Record<string, string> = {
   LW: '왼쪽 윙어',
   RW: '오른쪽 윙어',
   ST: '스트라이커',
+}
+
+export const ATTR_LABEL: Record<AttrKey, string> = {
+  finishing: '마무리',
+  firstTouch: '퍼스트터치',
+  dribbling: '드리블',
+  passing: '패스',
+  heading: '헤딩',
+  tackling: '태클',
+  marking: '마킹',
+  composure: '침착성',
+  positioning: '위치선정',
+  decisions: '판단력',
+  workRate: '투지',
+  teamwork: '팀워크',
+  vision: '시야',
+  pace: '속도',
+  acceleration: '가속력',
+  stamina: '체력',
+  strength: '근력',
+  jumping: '점프',
+  handling: '핸들링',
+  reflexes: '반사신경',
+  oneOnOne: '일대일',
 }
 
 export const FOOT_LABEL: Record<string, string> = { L: '왼발', R: '오른발', B: '양발' }

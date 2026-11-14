@@ -20,13 +20,13 @@ import type {
 } from './types'
 import { ATTR_KEYS } from './types'
 
-export const SAVE_VERSION = 1
+export const SAVE_VERSION = 2
 
 const GK_ONLY: AttrKey[] = ['handling', 'reflexes', 'oneOnOne']
 const OUTFIELD_SKILLS: AttrKey[] = ['finishing', 'dribbling', 'tackling', 'marking', 'heading', 'firstTouch']
 
 /** Squad template: position and quality offset relative to the club level. */
-const SQUAD_TEMPLATE: [Position, number][] = [
+export const SQUAD_TEMPLATE: [Position, number][] = [
   ['GK', 2], ['GK', -5], ['GK', -11],
   ['CB', 2], ['CB', 1], ['CB', -4], ['CB', -8],
   ['LB', 1], ['LB', -6],
@@ -51,6 +51,11 @@ const SECONDARY: Record<Position, Position[]> = {
   RW: ['LW', 'AM', 'ST'],
   ST: ['AM', 'LW', 'RW'],
 }
+
+/** Relative frequency of positions among youth intakes. */
+const YOUTH_POSITIONS: [Position, number][] = [
+  ['GK', 1], ['CB', 2], ['LB', 1], ['RB', 1], ['DM', 1], ['CM', 2], ['AM', 1.2], ['LW', 1.2], ['RW', 1.2], ['ST', 2],
+]
 
 export const emptyStats = (): SeasonStats => ({
   apps: 0,
@@ -113,29 +118,46 @@ function ageFor(rng: Rng, offset: number): number {
   return clamp(Math.round(20 + rng.next() * 7 + rng.next() * 7), 19, 34)
 }
 
-class NameFactory {
-  used = new Set<string>()
+export function professionalismFor(rng: Rng): number {
+  return clamp(Math.round(11 + rng.normal(3.8)), 1, 20)
+}
+
+export class NameFactory {
+  used: Set<string>
   rng: Rng
 
-  constructor(rng: Rng) {
+  constructor(rng: Rng, existing: Iterable<string> = []) {
     this.rng = rng
+    this.used = new Set(existing)
   }
 
   korean(): string {
     const weights = SURNAMES.map(([, w]) => w)
-    for (let i = 0; i < 50; i++) {
+    for (let i = 0; i < 80; i++) {
       const name = SURNAMES[this.rng.weighted(weights)][0] + this.rng.pick(GIVEN_NAMES)
       if (!this.used.has(name) && !BLOCKED_NAMES.has(name)) {
         this.used.add(name)
         return name
       }
     }
-    return SURNAMES[0][0] + this.rng.pick(GIVEN_NAMES) + this.used.size
+    // Fall back to a two-syllable given name built from two pool names.
+    for (let i = 0; i < 200; i++) {
+      const a = this.rng.pick(GIVEN_NAMES)
+      const b = this.rng.pick(GIVEN_NAMES)
+      const name = SURNAMES[this.rng.weighted(weights)][0] + a[0] + b[b.length - 1]
+      if (!this.used.has(name) && !BLOCKED_NAMES.has(name)) {
+        this.used.add(name)
+        return name
+      }
+    }
+    const name = `${SURNAMES[0][0]}${this.rng.pick(GIVEN_NAMES)}${this.used.size}`
+    this.used.add(name)
+    return name
   }
 
   foreign(code: string): string {
     const pool = FOREIGN[code]
-    for (let i = 0; i < 50; i++) {
+    for (let i = 0; i < 80; i++) {
       const first = this.rng.pick(pool.first)
       const last = this.rng.pick(pool.last)
       const name = code === 'JPN' ? `${last} ${first}` : `${first} ${last}`
@@ -144,7 +166,7 @@ class NameFactory {
         return name
       }
     }
-    return `${this.rng.pick(pool.first)} ${this.rng.pick(pool.last)}`
+    return this.korean()
   }
 }
 
@@ -179,13 +201,80 @@ export function clubLevel(reputation: number): number {
   return 44 + reputation * 0.36
 }
 
-export function generateSquad(
-  rng: Rng,
-  seed: ClubSeed,
-  names: NameFactory,
-  nextId: () => string,
-  season: number,
-): Player[] {
+/** Training and youth facility levels (1–5) for a reputation. */
+export function facilitiesFor(rng: Rng, reputation: number) {
+  const base = Math.round((reputation - 50) / 8) + 1
+  return {
+    training: clamp(base, 1, 5),
+    youth: clamp(base + rng.int(-1, 1), 1, 5),
+  }
+}
+
+export function freeShirt(rng: Rng, taken: Set<number>, pos: Position, preferStandard: boolean): number {
+  if (preferStandard) {
+    const std = (STANDARD_SHIRTS[pos] ?? []).find((n) => !taken.has(n))
+    if (std) return std
+  }
+  for (let i = 0; i < 200; i++) {
+    const n = rng.int(12, 45)
+    if (!taken.has(n)) return n
+  }
+  let n = 46
+  while (taken.has(n)) n++
+  return n
+}
+
+export interface CreatePlayerOptions {
+  id: string
+  clubId: string
+  pos: Position
+  target: number
+  age: number
+  season: number
+  shirt: number
+  names: NameFactory
+  potential?: number
+  foreignChance?: number
+  contractYears?: number
+}
+
+export function createPlayer(rng: Rng, o: CreatePlayerOptions): Player {
+  const attrs = generateAttributes(rng, o.pos, o.target, o.age)
+  const current = ovrAt(attrs, o.pos)
+  const foreign = rng.chance(o.foreignChance ?? 0.11)
+  const nationality = foreign ? rng.pick(Object.keys(FOREIGN)) : 'KOR'
+  const name = foreign ? o.names.foreign(nationality) : o.names.korean()
+  const secondaryCount = rng.weighted([0.35, 0.45, 0.2])
+  const secondary = rng.shuffle([...SECONDARY[o.pos]]).slice(0, secondaryCount)
+  const potential = o.potential !== undefined ? clamp(Math.max(o.potential, current), current, 94) : potentialFor(rng, current, o.age)
+  return {
+    id: o.id,
+    name,
+    nationality,
+    age: o.age,
+    position: o.pos,
+    secondary,
+    foot: footFor(rng, o.pos),
+    height: heightFor(rng, o.pos),
+    attrs,
+    potential,
+    condition: rng.int(90, 100),
+    morale: rng.int(60, 78),
+    injury: null,
+    suspension: 0,
+    yellowAccum: 0,
+    contract: { wage: wageFor(current, o.age), until: o.season + (o.contractYears ?? rng.int(0, 3)) },
+    clubId: o.clubId,
+    shirt: o.shirt,
+    stats: emptyStats(),
+    history: [current],
+    professionalism: professionalismFor(rng),
+    trainingFocus: 'balanced',
+    seasonStart: { ...attrs },
+  }
+}
+
+export function generateSquad(rng: Rng, seed: ClubSeed, names: NameFactory, nextId: () => string, season: number): Player[] {
   const level = clubLevel(seed.reputation)
   const players: Player[] = []
   const takenShirts = new Set<number>()
@@ -196,45 +285,40 @@ export function generateSquad(
     groupIndex[pos] = idx + 1
     const age = ageFor(rng, offset)
     const target = clamp(Math.round(level + offset + rng.normal(2.6)), 38, 90)
-    const attrs = generateAttributes(rng, pos, target, age)
-    const current = ovrAt(attrs, pos)
-    const foreign = rng.chance(0.11)
-    const nationality = foreign ? rng.pick(Object.keys(FOREIGN)) : 'KOR'
-    const name = foreign ? names.foreign(nationality) : names.korean()
-    const secondaryCount = rng.weighted([0.35, 0.45, 0.2])
-    const secondary = rng.shuffle([...SECONDARY[pos]]).slice(0, secondaryCount)
-
-    let shirt = idx === 0 ? (STANDARD_SHIRTS[pos] ?? []).find((n) => !takenShirts.has(n)) : undefined
-    if (!shirt) {
-      do shirt = rng.int(12, 40)
-      while (takenShirts.has(shirt))
-    }
+    const shirt = freeShirt(rng, takenShirts, pos, idx === 0)
     takenShirts.add(shirt)
-
-    players.push({
-      id: nextId(),
-      name,
-      nationality,
-      age,
-      position: pos,
-      secondary,
-      foot: footFor(rng, pos),
-      height: heightFor(rng, pos),
-      attrs,
-      potential: potentialFor(rng, current, age),
-      condition: rng.int(90, 100),
-      morale: rng.int(60, 78),
-      injury: null,
-      suspension: 0,
-      yellowAccum: 0,
-      contract: { wage: wageFor(current, age), until: season + rng.int(0, 3) },
-      clubId: seed.id,
-      shirt,
-      stats: emptyStats(),
-      history: [current],
-    })
+    players.push(createPlayer(rng, { id: nextId(), clubId: seed.id, pos, target, age, season, shirt, names }))
   }
   return players
+}
+
+/** A youth academy prospect. Better youth facilities give higher potential and more wonderkids. */
+export function createYouth(
+  rng: Rng,
+  o: { id: string; clubId: string; season: number; youthLevel: number; names: NameFactory; age?: number; shirt?: number },
+): Player {
+  const pos = YOUTH_POSITIONS[rng.weighted(YOUTH_POSITIONS.map(([, w]) => w))][0]
+  const age = o.age ?? rng.int(15, 17)
+  const target = clamp(Math.round(36 + o.youthLevel * 2 + (age - 15) * 3 + rng.normal(4)), 30, 58)
+  const wonderkid = rng.chance(0.03 + 0.02 * o.youthLevel)
+  const potential = wonderkid
+    ? rng.int(84, 93)
+    : clamp(Math.round(58 + o.youthLevel * 4 + rng.normal(7)), target + 8, 88)
+  const p = createPlayer(rng, {
+    id: o.id,
+    clubId: o.clubId,
+    pos,
+    target,
+    age,
+    season: o.season,
+    shirt: o.shirt ?? 0,
+    names: o.names,
+    potential,
+    foreignChance: 0.03,
+    contractYears: 3,
+  })
+  p.contract.wage = Math.max(30, Math.round(p.contract.wage * 0.5 / 10) * 10)
+  return p
 }
 
 function aiTactics(rng: Rng, reputation: number): { formation: FormationId; style: Style; press: Press; line: DefLine } {
@@ -273,6 +357,11 @@ export function createNewGame({ seed, userClubId, managerName = '감독' }: NewG
   for (const seedClub of CLUB_SEEDS) {
     const squad = generateSquad(rng, seedClub, names, nextId, season)
     for (const p of squad) players[p.id] = p
+    const facilities = facilitiesFor(rng, seedClub.reputation)
+    const youth = Array.from({ length: rng.int(3, 5) }, () =>
+      createYouth(rng, { id: nextId(), clubId: seedClub.id, season, youthLevel: facilities.youth, names }),
+    )
+    for (const p of youth) players[p.id] = p
     const isUser = seedClub.id === userClubId
     const t = isUser
       ? { formation: '4-3-3' as FormationId, style: 'balanced' as Style, press: 'mid' as Press, line: 'normal' as DefLine }
@@ -281,6 +370,8 @@ export function createNewGame({ seed, userClubId, managerName = '감독' }: NewG
       ...seedClub,
       budget: Math.round((100000 + (seedClub.reputation - 50) * 12000) / 1000) * 1000,
       playerIds: squad.map((p) => p.id),
+      youthIds: youth.map((p) => p.id),
+      facilities,
       tactics: { ...t, lineup: [], bench: [] },
       training: { focus: 'tactics', intensity: 'normal' },
     }

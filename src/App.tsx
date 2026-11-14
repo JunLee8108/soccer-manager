@@ -75,7 +75,7 @@ export default function App() {
       nav = 'league'
       break
     case 'club':
-      screen = <ClubScreen game={game} />
+      screen = <ClubScreen key={route.tab ?? 'training'} game={game} initialTab={route.tab} />
       nav = 'club'
       break
     case 'inbox':
