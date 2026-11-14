@@ -89,19 +89,22 @@ export function TacticsScreen({ game }: { game: GameState }) {
                 key={i}
                 type="button"
                 onClick={() => setPicker({ kind: 'slot', index: i })}
-                aria-label={p ? `${slot.pos} ${p.name}, 교체할 선수 선택` : `${slot.pos} 빈 자리, 선수 선택`}
+                aria-label={p ? `${slot.pos} ${p.name}, 예상 능력치 ${ratingAt(p, slot.pos)}, 교체할 선수 선택` : `${slot.pos} 빈 자리, 선수 선택`}
                 className="absolute flex w-[76px] -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-[3px] border-none bg-transparent p-0"
                 style={{ left: `${slot.x}%`, top: `${slot.y}%` }}
               >
                 {p ? (
                   <span
-                    className="flex size-9 items-center justify-center rounded-full border-2 bg-bg font-display text-[17px] font-bold text-ink"
+                    className={cx(
+                      'flex size-10 items-center justify-center rounded-full border-2 bg-bg font-display text-[19px] font-bold',
+                      offPos ? 'text-caution' : 'text-ink',
+                    )}
                     style={{ borderColor: p.condition < 80 ? '#FB923C' : '#A3E635' }}
                   >
-                    {p.shirt}
+                    {ratingAt(p, slot.pos)}
                   </span>
                 ) : (
-                  <span className="flex size-9 items-center justify-center rounded-full border-2 border-dashed border-white/50 bg-bg/60 text-white/80">
+                  <span className="flex size-10 items-center justify-center rounded-full border-2 border-dashed border-white/50 bg-bg/60 text-white/80">
                     <IconPlus size={16} />
                   </span>
                 )}
@@ -114,7 +117,7 @@ export function TacticsScreen({ game }: { game: GameState }) {
         </Pitch>
 
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[11px] text-muted">
-          <span>선수를 탭해 바꿀 선수를 고르세요</span>
+          <span>원 안 숫자: 그 자리 예상 능력치 · 탭해서 교체</span>
           <span className="flex items-center gap-3">
             <span className="flex items-center gap-1">
               <span className="size-2.5 rounded-full border-2 border-warn" />

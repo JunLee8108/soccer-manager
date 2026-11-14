@@ -42,6 +42,8 @@ export interface TeamStats {
 export interface MatchPlayer {
   id: string
   pos: Position
+  /** Formation slot index the player occupies (for drawing the pitch). */
+  slot: number
   energy: number
   rating: number
   goals: number
@@ -53,6 +55,17 @@ export interface MatchPlayer {
   minuteOn: number
   minuteOff: number | null
   saves: number
+  shots: number
+  onTarget: number
+  keyPasses: number
+  /** Tackles and interceptions. */
+  tackles: number
+  /** Fractional pass counts (shares of the team's passes). */
+  passes: number
+  passesCompleted: number
+  fouls: number
+  /** Rating sampled every five minutes on the pitch, newest last. */
+  ratingLog: number[]
 }
 
 export interface TeamState {
@@ -90,6 +103,8 @@ export interface LiveMatch {
   cornerFor: Side | null
   /** Injuries suffered in this match, applied to the players afterwards. */
   injuries: { playerId: string; weeks: number; type: string }[]
+  /** A user-controlled player got injured and is waiting to be replaced. */
+  pendingInjury: { side: Side; playerId: string } | null
 }
 
 export interface PlayerLine {
@@ -102,6 +117,11 @@ export interface PlayerLine {
   started: boolean
   yellow: boolean
   sentOff: boolean
+  shots?: number
+  onTarget?: number
+  keyPasses?: number
+  tackles?: number
+  passPct?: number
 }
 
 /** Compact post-match record of the user's last match. */

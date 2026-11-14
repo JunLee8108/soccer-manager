@@ -29,7 +29,7 @@ export function ratingRows(t: TeamState): RatingRow[] {
     status,
   })
   return [
-    ...t.onPitch.map((mp) => row(mp, 'on')),
+    ...t.onPitch.map((mp) => row(mp, mp.injured ? 'injured' : 'on')),
     ...t.off.map((mp) => row(mp, mp.sentOff ? 'sentOff' : mp.injured ? 'injured' : 'off')),
   ]
 }
@@ -186,6 +186,26 @@ export function MatchScreen({ game }: { game: GameState }) {
         </div>
 
         <div className="mx-4 mt-2.5 shrink-0">
+          {match.pendingInjury && !match.finished && (
+            <div className="mb-2 flex flex-col gap-2 rounded-xl border border-warn/40 bg-warn/8 px-3 py-2.5">
+              <span className="text-[13px] font-semibold">
+                {game.players[match.pendingInjury.playerId]?.name} 부상 — 교체가 필요합니다
+              </span>
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" onClick={() => setPaused(false)} className="h-9 rounded-lg border border-line bg-surface-2 text-[13px] font-semibold text-ink">
+                  그대로 진행
+                </button>
+                <button
+                  type="button"
+                  disabled={userTeam.subsLeft === 0 || userTeam.bench.length === 0}
+                  onClick={() => openSheet('subs')}
+                  className="h-9 rounded-lg border-none bg-accent text-[13px] font-bold text-bg disabled:opacity-50"
+                >
+                  교체하기
+                </button>
+              </div>
+            </div>
+          )}
           {halfTime && (
             <div className="mb-2 flex items-center justify-between gap-3 rounded-xl border border-accent/40 bg-accent/8 px-3 py-2.5">
               <span className="text-[13px] font-semibold">하프타임 — 전술과 교체를 점검하세요</span>

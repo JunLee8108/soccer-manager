@@ -5,7 +5,7 @@ import { migrateGame } from '../engine/migrate'
 import { promoteYouth, removePlayer } from '../engine/offseason'
 import { Rng } from '../engine/rng'
 import { BENCH_SIZE, isAvailable, refitLineup, autoLineup } from '../engine/lineup'
-import { setInstructions, simulateToEnd, stepMinute, substitute } from '../engine/match/engine'
+import { changeFormation, clearPendingInjury, setInstructions, simulateToEnd, stepMinute, substitute, swapPositions } from '../engine/match/engine'
 import type { LiveMatch } from '../engine/match/types'
 import { completeRound, isSeasonOver, startNewSeason, startUserMatch } from '../engine/season'
 import type { ContractDecision, FormationId, GameState, IndividualFocus, Instructions, Intensity, TrainingFocus } from '../engine/types'
@@ -52,6 +52,8 @@ interface GameStore {
   setSpeed(s: Speed): void
   setPaused(p: boolean): void
   matchSub(outId: string, inId: string): boolean
+  matchSwap(idA: string, idB: string): boolean
+  matchFormation(f: FormationId): void
   matchInstructions(ins: Partial<Instructions>): void
   finishMatch(): Promise<void>
   beginNextSeason(decisions: Record<string, ContractDecision>): Promise<void>
@@ -256,7 +258,8 @@ export const useGame = create<GameStore>((set, get) => {
       const m = { ...match }
       stepMinute(m, game)
       const atHalf = m.minute === 45 && !halfTimeSeen
-      set({ match: m, paused: atHalf ? true : get().paused, halfTimeSeen: halfTimeSeen || atHalf })
+      const injury = !!m.pendingInjury
+      set({ match: m, paused: atHalf || injury ? true : get().paused, halfTimeSeen: halfTimeSeen || atHalf })
     },
 
     skipMatch() {
@@ -273,6 +276,13 @@ export const useGame = create<GameStore>((set, get) => {
     },
 
     setPaused(paused) {
+      const { match } = get()
+      if (!paused && match?.pendingInjury) {
+        // Resuming without replacing the injured player: they play on hampered.
+        const m = { ...match }
+        clearPendingInjury(m)
+        set({ match: m })
+      }
       set({ paused })
     },
 
@@ -284,6 +294,24 @@ export const useGame = create<GameStore>((set, get) => {
       const ok = substitute(m, game, side, outId, inId)
       if (ok) set({ match: m })
       return ok
+    },
+
+    matchSwap(idA, idB) {
+      const { game, match } = get()
+      if (!game || !match) return false
+      const side = match.home.clubId === game.userClubId ? 'home' : 'away'
+      const m = { ...match, home: { ...match.home }, away: { ...match.away } }
+      const ok = swapPositions(m, side, idA, idB)
+      if (ok) set({ match: m })
+      return ok
+    },
+
+    matchFormation(f) {
+      const { game, match } = get()
+      if (!game || !match) return
+      const side = match.home.clubId === game.userClubId ? 'home' : 'away'
+      const m = { ...match, home: { ...match.home }, away: { ...match.away } }
+      if (changeFormation(m, game, side, f)) set({ match: m })
     },
 
     matchInstructions(ins) {

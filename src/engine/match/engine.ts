@@ -1,7 +1,7 @@
 import { FORMATIONS } from '../data/formations'
-import { keeperScore, ratingAt, teamStrength, type Strength } from '../ratings'
+import { attackScore, defenseScore, keeperScore, ratingAt, teamStrength, type Strength } from '../ratings'
 import { clamp, Rng } from '../rng'
-import type { Club, Fixture, Instructions, Player, Position } from '../types'
+import type { Club, FormationId, Fixture, Instructions, Player, Position } from '../types'
 import { LINE_OF } from '../types'
 import {
   flavorText,
@@ -48,6 +48,8 @@ const CORNER_WEIGHTS: Record<Position, number> = { GK: 0, CB: 3.5, LB: 0.5, RB: 
 const ASSIST_WEIGHTS: Record<Position, number> = { GK: 0.05, CB: 0.3, LB: 1.4, RB: 1.4, DM: 1, CM: 2.5, AM: 3, LW: 3, RW: 3, ST: 1.4 }
 const CROSS_WEIGHTS: Record<Position, number> = { GK: 0, CB: 0.2, LB: 2.5, RB: 2.5, DM: 0.6, CM: 1.5, AM: 1.5, LW: 3.5, RW: 3.5, ST: 0.6 }
 const FOUL_WEIGHTS: Record<Position, number> = { GK: 0.1, CB: 1.6, LB: 1.3, RB: 1.3, DM: 1.8, CM: 1.3, AM: 0.8, LW: 0.7, RW: 0.7, ST: 0.8 }
+const PASS_WEIGHTS: Record<Position, number> = { GK: 0.6, CB: 1.6, LB: 1.6, RB: 1.6, DM: 2.4, CM: 2.6, AM: 2.2, LW: 1.5, RW: 1.5, ST: 1 }
+const TACKLE_WEIGHTS: Record<Position, number> = { GK: 0.1, CB: 2, LB: 1.6, RB: 1.6, DM: 2.4, CM: 1.4, AM: 0.6, LW: 0.6, RW: 0.6, ST: 0.4 }
 
 const INJURY_TYPES = ['햄스트링 부상', '발목 염좌', '종아리 근육 경련', '무릎 타박상', '허벅지 근육 부상', '어깨 탈구', '사타구니 부상']
 
@@ -67,13 +69,15 @@ const emptyStats = (): TeamStats => ({
 const fatigueFactor = (energy: number) => 0.72 + 0.28 * (energy / 100)
 const moraleFactor = (morale: number) => 0.97 + 0.06 * (morale / 100)
 
-function newMatchPlayer(p: Player, pos: Position, minute: number, started: boolean): MatchPlayer {
+function newMatchPlayer(p: Player, pos: Position, slot: number, minute: number, started: boolean): MatchPlayer {
   const quality = (ratingAt(p, pos) - 65) / 50
+  const rating = 6.3 + quality
   return {
     id: p.id,
     pos,
+    slot,
     energy: p.condition,
-    rating: 6.3 + quality,
+    rating,
     goals: 0,
     assists: 0,
     yellow: false,
@@ -83,6 +87,14 @@ function newMatchPlayer(p: Player, pos: Position, minute: number, started: boole
     minuteOn: minute,
     minuteOff: null,
     saves: 0,
+    shots: 0,
+    onTarget: 0,
+    keyPasses: 0,
+    tackles: 0,
+    passes: 0,
+    passesCompleted: 0,
+    fouls: 0,
+    ratingLog: [rating],
   }
 }
 
@@ -91,7 +103,7 @@ function buildTeam(club: Club, ctx: MatchContext, aiControlled: boolean): TeamSt
   const onPitch: MatchPlayer[] = []
   club.tactics.lineup.forEach((id, i) => {
     const p = id ? ctx.players[id] : undefined
-    if (p) onPitch.push(newMatchPlayer(p, slots[i].pos, 0, true))
+    if (p) onPitch.push(newMatchPlayer(p, slots[i].pos, i, 0, true))
   })
   const starters = new Set(onPitch.map((mp) => mp.id))
   return {
@@ -126,6 +138,7 @@ export function createMatch(fixture: Fixture, ctx: MatchContext, seed: number, u
     rng: seed >>> 0,
     cornerFor: null,
     injuries: [],
+    pendingInjury: null,
   }
 }
 
@@ -261,6 +274,8 @@ function resolveChance(env: StepEnv, side: Side, kind: ChanceKind, attS: Strengt
 
   att.stats.shots++
   att.stats.xg += xg
+  shooter.shots++
+  if (assister) assister.keyPasses++
   addMomentum(m, side, 3)
   m.ballX = side === 'home' ? rng.range(84, 95) : rng.range(5, 16)
 
@@ -270,6 +285,7 @@ function resolveChance(env: StepEnv, side: Side, kind: ChanceKind, attS: Strengt
   if (rng.chance(goalP)) {
     att.goals++
     att.stats.onTarget++
+    shooter.onTarget++
     shooter.goals++
     shooter.rating += kind === 'penalty' ? 0.85 : 1.1
     if (assister) {
@@ -296,6 +312,7 @@ function resolveChance(env: StepEnv, side: Side, kind: ChanceKind, attS: Strengt
   if (assister) assister.rating += 0.08
   if (rng.chance(onTargetP) && keeper) {
     att.stats.onTarget++
+    shooter.onTarget++
     keeper.saves++
     keeper.rating += xg > 0.2 ? 0.45 : 0.25
     shooter.rating += 0.05
@@ -341,25 +358,33 @@ function doSub(env: StepEnv, side: Side, outId: string, inId: string): boolean {
   const idx = t.onPitch.findIndex((mp) => mp.id === outId)
   if (idx < 0 || t.subsLeft <= 0 || !t.bench.includes(inId)) return false
   const out = t.onPitch[idx]
-  const incoming = newMatchPlayer(env.ctx.players[inId], out.pos, env.m.minute, false)
+  const incoming = newMatchPlayer(env.ctx.players[inId], out.pos, out.slot, env.m.minute, false)
   out.minuteOff = env.m.minute
   t.off.push(out)
   t.onPitch[idx] = incoming
   t.bench = t.bench.filter((id) => id !== inId)
   t.subsLeft--
+  if (env.m.pendingInjury?.playerId === outId) env.m.pendingInjury = null
   push(env, { type: 'sub', side, playerId: inId, text: subText(clubName(env, side), nameOf(env, outId), nameOf(env, inId)) })
   return true
 }
 
 function handleInjury(env: StepEnv, side: Side) {
   const t = team(env.m, side)
-  const outfield = t.onPitch.filter((mp) => mp.pos !== 'GK')
+  const outfield = t.onPitch.filter((mp) => mp.pos !== 'GK' && !mp.injured)
   if (outfield.length === 0) return
   const victim = outfield[Math.floor(env.rng.next() * outfield.length)]
   victim.injured = true
   victim.rating -= 0.1
   const weeks = [1, 1, 1, 2, 2, 2, 3, 3, 4, 5, 6, 8][env.rng.int(0, 11)]
   env.m.injuries.push({ playerId: victim.id, weeks, type: env.rng.pick(INJURY_TYPES) })
+  if (!t.aiControlled) {
+    // The manager decides: the player limps on until replaced.
+    victim.energy = Math.min(victim.energy, 25)
+    env.m.pendingInjury = { side, playerId: victim.id }
+    push(env, { type: 'injury', side, playerId: victim.id, text: `${nameOf(env, victim.id)}, 부상으로 정상적인 플레이가 어렵습니다. 교체가 필요합니다.` })
+    return
+  }
   push(env, { type: 'injury', side, playerId: victim.id, text: injuryText(nameOf(env, victim.id)) })
   const replacement = t.subsLeft > 0 ? bestBenchFor(env, t, victim.pos) : null
   if (replacement) doSub(env, side, victim.id, replacement)
@@ -374,6 +399,7 @@ function handleFoul(env: StepEnv, defSide: Side, attS: Strength, defS: Strength)
   t.stats.fouls++
   const offender = pickPlayer(env, t, FOUL_WEIGHTS, (p) => p.attrs.workRate + 4)
   if (!offender) return
+  offender.fouls++
   const cardP = 0.1 * (t.press === 'high' ? 1.15 : 1)
   if (rng.chance(cardP)) {
     const name = nameOf(env, offender.id)
@@ -436,6 +462,22 @@ function aiSubs(env: StepEnv, side: Side) {
     const inId = bestBenchFor(env, t, out.pos)
     if (inId && doSub(env, side, out.id, inId)) made++
   }
+}
+
+function sharePasses(env: StepEnv, t: TeamState, passes: number, completion: number) {
+  let total = 0
+  const w = t.onPitch.map((mp) => {
+    const v = PASS_WEIGHTS[mp.pos] * (env.ctx.players[mp.id].attrs.passing / 12)
+    total += v
+    return v
+  })
+  if (total <= 0) return
+  t.onPitch.forEach((mp, i) => {
+    const share = (passes * w[i]) / total
+    const rate = clamp(completion + (env.ctx.players[mp.id].attrs.passing - 12) * 0.012, 0.5, 0.97)
+    mp.passes += share
+    mp.passesCompleted += share * rate
+  })
 }
 
 function drainEnergy(env: StepEnv, t: TeamState) {
@@ -512,8 +554,10 @@ export function stepMinute(m: LiveMatch, ctx: MatchContext): void {
   const completion = clamp(0.77 + (attS.midfield - 12) * 0.025 + (att.style === 'possession' ? 0.04 : 0) - (def.press === 'high' ? 0.03 : 0), 0.62, 0.94)
   att.stats.passes += passes
   att.stats.passesCompleted += Math.round(passes * completion)
+  sharePasses(env, att, passes, completion)
   def.stats.passes += 1
   def.stats.passesCompleted += rng.chance(0.75) ? 1 : 0
+  sharePasses(env, def, 1, 0.75)
   addMomentum(m, attSide, 1)
   m.ballX = attSide === 'home' ? rng.range(52, 80) : rng.range(20, 48)
   for (const mp of att.onPitch) if (LINE_OF[mp.pos] === 'MF') mp.rating += 0.004
@@ -536,8 +580,12 @@ export function stepMinute(m: LiveMatch, ctx: MatchContext): void {
   rate *= def.line === 'high' ? 1.08 : def.line === 'deep' ? 0.9 : 1
   if (rng.chance(rate)) {
     resolveChance(env, attSide, chooseKind(env, att, def), attS, defS)
-  } else {
-    for (const mp of def.onPitch) if (LINE_OF[mp.pos] === 'DF') mp.rating += 0.003
+  } else if (rng.chance(0.45)) {
+    const winner = pickPlayer(env, def, TACKLE_WEIGHTS, (p) => (p.attrs.tackling + p.attrs.positioning) / 2)
+    if (winner) {
+      winner.tackles++
+      winner.rating += 0.025
+    }
   }
   if (rng.chance(0.05)) {
     att.stats.corners++
@@ -560,6 +608,10 @@ export function stepMinute(m: LiveMatch, ctx: MatchContext): void {
   if (!env.hadEvent && rng.chance(0.11) && att.onPitch.length > 0) {
     const mp = att.onPitch[Math.floor(rng.next() * att.onPitch.length)]
     push(env, { type: 'info', side: attSide, text: flavorText(rng, clubName(env, attSide), att, nameOf(env, mp.id)) })
+  }
+
+  if (m.minute % 5 === 0) {
+    for (const t of [m.home, m.away]) for (const mp of t.onPitch) mp.ratingLog = [...mp.ratingLog, mp.rating].slice(-18)
   }
 
   if (m.minute === HALF) {
@@ -619,6 +671,11 @@ function lines(t: TeamState): PlayerLine[] {
       started: mp.started,
       yellow: mp.yellow,
       sentOff: mp.sentOff,
+      shots: mp.shots,
+      onTarget: mp.onTarget,
+      keyPasses: mp.keyPasses,
+      tackles: mp.tackles,
+      passPct: mp.passes >= 1 ? Math.round((mp.passesCompleted / mp.passes) * 100) : undefined,
     }))
 }
 
@@ -635,4 +692,154 @@ export function buildReport(m: LiveMatch, fixture: Fixture): MatchReport {
     momentum: m.momentum,
     motmId: motmOf(m),
   }
+}
+
+// ---- Match board helpers ----
+
+/** Rating change over the last ~15 minutes on the pitch. */
+export function ratingTrend(mp: MatchPlayer): number {
+  const log = mp.ratingLog
+  const ref = log.length >= 4 ? log[log.length - 4] : log[0]
+  return Math.round((mp.rating - ref) * 10) / 10
+}
+
+export function passPct(mp: MatchPlayer): number | null {
+  return mp.passes >= 1 ? Math.round((mp.passesCompleted / mp.passes) * 100) : null
+}
+
+/** Swap the positions of two players on the pitch. */
+export function swapPositions(m: LiveMatch, side: Side, idA: string, idB: string): boolean {
+  if (m.finished || idA === idB) return false
+  const t = team(m, side)
+  const a = t.onPitch.find((mp) => mp.id === idA)
+  const b = t.onPitch.find((mp) => mp.id === idB)
+  if (!a || !b) return false
+  ;[a.pos, b.pos] = [b.pos, a.pos]
+  ;[a.slot, b.slot] = [b.slot, a.slot]
+  return true
+}
+
+const SLOT_FILL_ORDER: Position[] = ['GK', 'CB', 'DM', 'CM', 'LB', 'RB', 'ST', 'AM', 'LW', 'RW']
+
+/**
+ * Switch formation mid-match. Players keep their role where the new shape has
+ * it, otherwise they move to the slot they suit best. With fewer than eleven
+ * players the least important slots stay empty.
+ */
+export function changeFormation(m: LiveMatch, ctx: MatchContext, side: Side, formation: FormationId): boolean {
+  if (m.finished) return false
+  const t = team(m, side)
+  const slots = FORMATIONS[formation].slots
+  const order = slots
+    .map((s, i) => ({ i, pri: SLOT_FILL_ORDER.indexOf(s.pos) }))
+    .sort((a, b) => a.pri - b.pri || a.i - b.i)
+    .map((x) => x.i)
+  const pool = [...t.onPitch]
+  for (const i of order) {
+    if (pool.length === 0) break
+    const pos = slots[i].pos
+    let best = 0
+    let bestScore = -Infinity
+    pool.forEach((mp, k) => {
+      const p = ctx.players[mp.id]
+      const score = ratingAt(p, pos) + (mp.pos === pos ? 4 : 0) + (pos === 'GK' && p.position === 'GK' ? 50 : 0)
+      if (score > bestScore) {
+        bestScore = score
+        best = k
+      }
+    })
+    const [mp] = pool.splice(best, 1)
+    mp.slot = i
+    mp.pos = pos
+  }
+  t.formation = formation
+  return true
+}
+
+export interface SubSuggestion {
+  outId: string
+  inId: string
+  /** Higher = more urgent. */
+  urgency: number
+  reasons: string[]
+  inNote: string
+}
+
+/** Coach's substitution advice for one side, most urgent first. */
+export function suggestSubs(m: LiveMatch, ctx: MatchContext, side: Side, limit = 3): SubSuggestion[] {
+  const t = team(m, side)
+  if (m.finished || t.subsLeft <= 0 || t.bench.length === 0) return []
+  const diff = t.goals - team(m, other(side)).goals
+  const minute = m.minute
+  const needs = t.onPitch
+    .map((mp) => {
+      let need = 0
+      const reasons: string[] = []
+      if (mp.injured) {
+        need += 5
+        reasons.push('부상')
+      }
+      if (mp.energy < 60) {
+        need += (60 - mp.energy) * 0.06
+        reasons.push(`체력 ${Math.round(mp.energy)}%`)
+      }
+      if (minute >= 30 && mp.rating < 6.2) {
+        need += (6.2 - mp.rating) * 1.6
+        reasons.push(`평점 ${mp.rating.toFixed(1)}`)
+      }
+      if (minute >= 30 && ratingTrend(mp) <= -0.3) {
+        need += 0.4
+        reasons.push('최근 15분 평점 하락')
+      }
+      if (mp.yellow && minute >= 50 && LINE_OF[mp.pos] !== 'FW') {
+        need += 0.5
+        reasons.push('경고 1회 — 퇴장 위험')
+      }
+      if (mp.pos === 'GK' && !mp.injured) need = 0
+      if (minute < 45 && !mp.injured) need *= 0.4
+      return { mp, need, reasons }
+    })
+    .filter((x) => x.need >= 0.6)
+    .sort((a, b) => b.need - a.need)
+
+  const used = new Set<string>()
+  const out: SubSuggestion[] = []
+  for (const { mp, need, reasons } of needs) {
+    if (out.length >= limit || out.length >= t.subsLeft) break
+    const line = LINE_OF[mp.pos]
+    let best: string | null = null
+    let bestScore = -Infinity
+    for (const id of t.bench) {
+      if (used.has(id)) continue
+      const p = ctx.players[id]
+      let s = ratingAt(p, mp.pos) * (0.8 + 0.2 * (p.condition / 100))
+      if (minute >= 60 && diff < 0 && line !== 'DF') s += attackScore(p.attrs) * 0.6
+      if (minute >= 70 && diff > 0 && line !== 'FW') s += defenseScore(p.attrs) * 0.6
+      if (s > bestScore) {
+        bestScore = s
+        best = id
+      }
+    }
+    if (!best) break
+    const inP = ctx.players[best]
+    const outVal = ratingAt(ctx.players[mp.id], mp.pos) * fatigueFactor(mp.energy)
+    const inVal = ratingAt(inP, mp.pos) * fatigueFactor(inP.condition)
+    if (!mp.injured && mp.energy > 40 && inVal < outVal - 6) continue
+    used.add(best)
+    const extra = [...reasons]
+    if (minute >= 60 && diff < 0 && line !== 'DF') extra.push('추격 — 공격 강화')
+    if (minute >= 70 && diff > 0 && line !== 'FW') extra.push('리드 지키기')
+    out.push({
+      outId: mp.id,
+      inId: best,
+      urgency: Math.round(need * 10) / 10,
+      reasons: extra,
+      inNote: `${mp.pos} 예상 ${ratingAt(inP, mp.pos)} · 컨디션 ${inP.condition}%`,
+    })
+  }
+  return out
+}
+
+export function clearPendingInjury(m: LiveMatch) {
+  m.pendingInjury = null
 }
