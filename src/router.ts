@@ -11,6 +11,7 @@ export type Route =
   | { name: 'club'; tab?: string }
   | { name: 'inbox' }
   | { name: 'season' }
+  | { name: 'market' }
 
 export function parseHash(hash: string): Route {
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean)
@@ -33,6 +34,8 @@ export function parseHash(hash: string): Route {
       return { name: 'inbox' }
     case 'season':
       return { name: 'season' }
+    case 'market':
+      return { name: 'market' }
     default:
       return { name: 'home' }
   }

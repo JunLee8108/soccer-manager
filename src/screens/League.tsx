@@ -170,7 +170,7 @@ function LeaderList({ title, rows, game, format }: { title: string; rows: Leader
       <h2 className="m-0 px-3.5 py-2.5 text-[14px] font-bold">{title}</h2>
       {rows.length === 0 && <EmptyState title="아직 기록이 없습니다" />}
       {rows.map(({ player, value }, i) => {
-        const club = game.clubs[player.clubId]
+        const club = game.clubs[player.clubId] ?? { id: 'FA', name: '자유계약', color: '#4B5A75' }
         const mine = club.id === game.userClubId
         const row = (
           <>

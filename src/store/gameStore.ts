@@ -1,13 +1,29 @@
 import { create } from 'zustand'
 import { FORMATIONS } from '../engine/data/formations'
 import { createNewGame } from '../engine/generator'
+import { acceptJob } from '../engine/board'
+import { upgradeFacility, type FacilityKind } from '../engine/finance'
 import { migrateGame } from '../engine/migrate'
+import {
+  acceptOffer,
+  budgetCheck,
+  evaluateBid,
+  evaluateContract,
+  executeTransfer,
+  listPlayer,
+  rejectOffer,
+  releasePlayer,
+  renewContract,
+  startScouting,
+  unlistPlayer,
+  windowState,
+} from '../engine/transfers'
 import { promoteYouth, removePlayer } from '../engine/offseason'
 import { Rng } from '../engine/rng'
 import { BENCH_SIZE, isAvailable, refitLineup, autoLineup } from '../engine/lineup'
 import { changeFormation, clearPendingInjury, setInstructions, simulateToEnd, stepMinute, substitute, swapPositions } from '../engine/match/engine'
 import type { LiveMatch } from '../engine/match/types'
-import { completeRound, isSeasonOver, startNewSeason, startUserMatch } from '../engine/season'
+import { addMessage, completeRound, isSeasonOver, startNewSeason, startUserMatch } from '../engine/season'
 import type { ContractDecision, FormationId, GameState, IndividualFocus, Instructions, Intensity, TrainingFocus } from '../engine/types'
 import { createSaveRepository, lastSlot, rememberSlot, type SaveMeta } from './persistence'
 
@@ -27,6 +43,9 @@ interface GameStore {
   /** Half-time pause already shown for the current match. */
   halfTimeSeen: boolean
   busy: boolean
+  /** Short confirmation shown at the bottom of the screen. */
+  toast: string | null
+  showToast(text: string | null): void
   /** Open the match board automatically at half-time and on injuries. */
   autoBoard: boolean
   setAutoBoard(v: boolean): void
@@ -48,6 +67,14 @@ interface GameStore {
   setPlayerFocus(playerId: string, focus: IndividualFocus): void
   promoteYouth(playerId: string): void
   releaseYouth(playerId: string): void
+  scoutPlayer(playerId: string): string | null
+  signPlayer(playerId: string, fee: number, wage: number, years: number): string | null
+  extendContract(playerId: string, wage: number, years: number): string | null
+  releaseFirstTeamPlayer(playerId: string): void
+  setTransferListed(playerId: string, price: number | null): void
+  respondToOffer(offerId: string, accept: boolean): void
+  upgradeFacility(kind: FacilityKind): void
+  takeJob(clubId: string): Promise<void>
 
   ensureMatch(): void
   tick(): void
@@ -113,6 +140,11 @@ export const useGame = create<GameStore>((set, get) => {
     halfTimeSeen: false,
     busy: false,
     autoBoard: readAutoBoard(),
+    toast: null,
+
+    showToast(text) {
+      set({ toast: text })
+    },
 
     setAutoBoard(v) {
       try {
@@ -264,6 +296,85 @@ export const useGame = create<GameStore>((set, get) => {
         const club = game.clubs[game.userClubId]
         if (club.youthIds.includes(playerId)) removePlayer(game, playerId)
       })
+    },
+
+    scoutPlayer(playerId) {
+      let error: string | null = null
+      updateUserClub((game) => {
+        const r = startScouting(game, playerId)
+        if (!r.ok) error = r.reason ?? '스카우트를 보낼 수 없습니다'
+      })
+      return error
+    },
+
+    signPlayer(playerId, fee, wage, years) {
+      const { game } = get()
+      if (!game) return '게임이 없습니다'
+      const p = game.players[playerId]
+      if (!p || p.clubId === game.userClubId) return '영입할 수 없는 선수입니다'
+      const free = p.clubId === 'FA'
+      if (!free && !windowState(game).open) return '이적시장이 닫혀 있습니다'
+      if (!free && evaluateBid(game, playerId, fee).result !== 'accept') return '구단이 이적료에 동의하지 않았습니다'
+      if (evaluateContract(game, playerId, wage).result !== 'accept') return '선수가 계약 조건에 동의하지 않았습니다'
+      const check = budgetCheck(game, free ? 0 : fee, wage)
+      if (!check.ok) return check.reason ?? '예산이 부족합니다'
+      updateUserClub((g) => {
+        executeTransfer(g, playerId, g.userClubId, free ? 0 : fee, { wage, years }, new Rng(g.nextId * 31 + g.round))
+        addMessage(g, 'board', `${p.name} 영입 완료`, `${p.name} 선수가 ${years}년 계약으로 합류했습니다.`)
+      })
+      set({ toast: `${p.name} 영입 완료 · ${years}년 계약` })
+      return null
+    },
+
+    extendContract(playerId, wage, years) {
+      const { game } = get()
+      if (!game) return '게임이 없습니다'
+      const p = game.players[playerId]
+      if (!p || p.clubId !== game.userClubId) return '우리 팀 선수가 아닙니다'
+      if (evaluateContract(game, playerId, wage).result !== 'accept') return '선수가 조건에 동의하지 않았습니다'
+      const check = budgetCheck(game, 0, wage, p.contract.wage)
+      if (!check.ok) return check.reason ?? '예산이 부족합니다'
+      updateUserClub((g) => renewContract(g, playerId, wage, years))
+      return null
+    },
+
+    releaseFirstTeamPlayer(playerId) {
+      updateUserClub((game) => {
+        releasePlayer(game, playerId)
+      })
+    },
+
+    setTransferListed(playerId, price) {
+      updateUserClub((game) => {
+        if (game.players[playerId]?.clubId !== game.userClubId) return
+        if (price === null) unlistPlayer(game, playerId)
+        else listPlayer(game, playerId, price)
+      })
+    },
+
+    respondToOffer(offerId, accept) {
+      updateUserClub((game) => {
+        if (accept) acceptOffer(game, offerId, new Rng(game.nextId * 17 + game.round))
+        else rejectOffer(game, offerId)
+      })
+    },
+
+    upgradeFacility(kind) {
+      updateUserClub((game) => {
+        upgradeFacility(game, game.userClubId, kind)
+      })
+    },
+
+    async takeJob(clubId) {
+      updateUserClub((game) => {
+        const prev = game.clubs[game.userClubId].name
+        acceptJob(game, clubId)
+        const club = game.clubs[clubId]
+        addMessage(game, 'board', `${club.name} 감독 부임`, `${prev}을(를) 떠나 ${club.name}의 지휘봉을 잡았습니다. 이사회의 목표는 '${game.objective.label}'입니다.`)
+      })
+      set({ match: null })
+      await persist(get, true)
+      await get().refreshSaves()
     },
 
     ensureMatch() {

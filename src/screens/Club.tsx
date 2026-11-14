@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { projectGrowth, type GrowthLevel } from '../engine/development'
-import { ATTR_LABEL, formatMoney } from '../engine/korean'
+import { ATTR_LABEL } from '../engine/korean'
 import { ovr, potentialStars } from '../engine/ratings'
 import { RECOVERY_FOCUS_BONUS, RECOVERY_RATE } from '../engine/season'
 import type { GameState, Intensity, Player, TrainingFocus } from '../engine/types'
 import { href } from '../router'
 import { useGame } from '../store/gameStore'
+import { FinancePanel } from './Finance'
+import { TransferHub } from './Transfers'
 import { Card, ConditionBar, EmptyState, PosBadge, ScreenHeader, Segmented, Stars, conditionColor, cx } from '../ui/kit'
 
 type Tab = 'training' | 'youth' | 'transfer' | 'finance'
@@ -60,12 +62,8 @@ export function ClubScreen({ game, initialTab }: { game: GameState; initialTab?:
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
         {tab === 'training' && <Training game={game} />}
         {tab === 'youth' && <Youth game={game} />}
-        {tab === 'transfer' && (
-          <Card>
-            <EmptyState title="이적 시장은 M3 업데이트에서 열립니다" body="스카우팅, 이적 제안·협상, 계약 연장이 추가될 예정입니다." />
-          </Card>
-        )}
-        {tab === 'finance' && <Finance game={game} />}
+        {tab === 'transfer' && <TransferHub game={game} />}
+        {tab === 'finance' && <FinancePanel game={game} />}
       </div>
     </div>
   )
@@ -262,29 +260,5 @@ function Youth({ game }: { game: GameState }) {
         ))}
       </Card>
     </div>
-  )
-}
-
-function Finance({ game }: { game: GameState }) {
-  const club = game.clubs[game.userClubId]
-  const wages = [...club.playerIds, ...club.youthIds].reduce((s, id) => s + game.players[id].contract.wage, 0)
-  const rows: [string, string][] = [
-    ['구단 예산', formatMoney(club.budget)],
-    ['주급 총액 (유스 포함)', formatMoney(wages)],
-    ['시즌 주급 지출 (30주)', formatMoney(wages * 30)],
-    ['홈 구장', club.stadium],
-    ['수용 인원', `${club.capacity.toLocaleString('ko-KR')}명`],
-    ['구단 명성', `${club.reputation} / 100`],
-  ]
-  return (
-    <Card className="flex flex-col divide-y divide-line-soft">
-      {rows.map(([k, v]) => (
-        <div key={k} className="flex items-center justify-between px-4 py-3.5 text-[14px]">
-          <span className="text-muted">{k}</span>
-          <span className="font-semibold">{v}</span>
-        </div>
-      ))}
-      <p className="m-0 px-4 py-3 text-[12px] leading-relaxed text-muted">관중·중계권 수입과 상금, 시설 투자, 이사회 예산 관리는 M3 업데이트에서 추가됩니다.</p>
-    </Card>
   )
 }

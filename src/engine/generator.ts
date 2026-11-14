@@ -1,5 +1,6 @@
 import { CLUB_SEEDS, type ClubSeed } from './data/clubs'
 import { BLOCKED_NAMES, FOREIGN, GIVEN_NAMES, SURNAMES } from './data/names'
+import { emptyFinance } from './finance'
 import { autoLineup } from './lineup'
 import { ovrAt, POSITION_WEIGHTS, wageFor } from './ratings'
 import { clamp, Rng } from './rng'
@@ -18,9 +19,9 @@ import type {
   SeasonStats,
   Style,
 } from './types'
-import { ATTR_KEYS } from './types'
+import { ATTR_KEYS, FREE_AGENT } from './types'
 
-export const SAVE_VERSION = 2
+export const SAVE_VERSION = 3
 
 const GK_ONLY: AttrKey[] = ['handling', 'reflexes', 'oneOnOne']
 const OUTFIELD_SKILLS: AttrKey[] = ['finishing', 'dribbling', 'tackling', 'marking', 'heading', 'firstTouch']
@@ -366,9 +367,12 @@ export function createNewGame({ seed, userClubId, managerName = '감독' }: NewG
     const t = isUser
       ? { formation: '4-3-3' as FormationId, style: 'balanced' as Style, press: 'mid' as Press, line: 'normal' as DefLine }
       : aiTactics(rng, seedClub.reputation)
+    const budget = Math.round((100000 + (seedClub.reputation - 50) * 12000) / 1000) * 1000
+    const wages = [...squad, ...youth].reduce((s, p) => s + p.contract.wage, 0)
     const club: Club = {
       ...seedClub,
-      budget: Math.round((100000 + (seedClub.reputation - 50) * 12000) / 1000) * 1000,
+      budget,
+      finance: emptyFinance(budget, wages),
       playerIds: squad.map((p) => p.id),
       youthIds: youth.map((p) => p.id),
       facilities,
@@ -386,6 +390,25 @@ export function createNewGame({ seed, userClubId, managerName = '감독' }: NewG
   const objective = objectiveFor(repRank)
   const user = clubs[userClubId]
   const now = Date.now()
+
+  // A few unattached players are available from day one.
+  const freeAgents: string[] = []
+  for (let i = 0; i < 14; i++) {
+    const pos = rng.pick(SQUAD_TEMPLATE)[0]
+    const p = createPlayer(rng, {
+      id: nextId(),
+      clubId: FREE_AGENT,
+      pos,
+      target: Math.round(rng.range(52, 68)),
+      age: rng.int(21, 31),
+      season,
+      shirt: 0,
+      names,
+      contractYears: 0,
+    })
+    players[p.id] = p
+    freeAgents.push(p.id)
+  }
 
   return {
     version: SAVE_VERSION,
@@ -405,13 +428,20 @@ export function createNewGame({ seed, userClubId, managerName = '감독' }: NewG
         round: 0,
         tag: 'board',
         title: `${user.name}에 오신 것을 환영합니다`,
-        body: `이사회의 이번 시즌 목표는 '${objective.label}'입니다. 선수단을 파악하고 첫 경기를 준비해 주세요.`,
+        body: `이사회의 이번 시즌 목표는 '${objective.label}'입니다. 이적시장이 4라운드 동안 열려 있으니 선수단을 파악하고 보강도 검토해 주세요.`,
         read: false,
       },
     ],
     objective,
     history: [],
     lastReport: null,
+    freeAgents,
+    scouted: [],
+    scoutQueue: [],
+    transferList: {},
+    offers: [],
+    news: [],
+    board: { confidence: 60, status: 'ok', jobOffers: [] },
     nextId: counter,
     managerName,
     createdAt: now,

@@ -1,3 +1,4 @@
+import { emptyFinance, weeklyWages } from './finance'
 import { createYouth, facilitiesFor, NameFactory, professionalismFor, SAVE_VERSION } from './generator'
 import { mixSeed, Rng } from './rng'
 import type { GameState } from './types'
@@ -33,6 +34,21 @@ export function migrateGame(input: GameState): GameState {
       }
     }
     game.version = 2
+  }
+
+  if (game.version < 3) {
+    for (const id of game.clubOrder) {
+      const club = game.clubs[id]
+      club.finance ??= emptyFinance(club.budget, weeklyWages(game, club))
+    }
+    game.freeAgents ??= []
+    game.scouted ??= []
+    game.scoutQueue ??= []
+    game.transferList ??= {}
+    game.offers ??= []
+    game.news ??= []
+    game.board ??= { confidence: 60, status: 'ok', jobOffers: [] }
+    game.version = 3
   }
   return game
 }

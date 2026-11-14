@@ -1,3 +1,4 @@
+import { managerTitle } from '../engine/korean'
 import { useState } from 'react'
 import { LEAGUE_NAME } from '../engine/data/clubs'
 import { ovr } from '../engine/ratings'
@@ -7,7 +8,10 @@ import type { GameState } from '../engine/types'
 import { href, navigate } from '../router'
 import { useGame } from '../store/gameStore'
 import { IconBell, IconChevronRight, IconMenu } from '../ui/Icons'
+import { formatMoney } from '../engine/korean'
+import { windowLabel, windowState } from '../engine/transfers'
 import { Card, Crest, FormBadge, Sheet, TAG_STYLE, cx, moraleLabel } from '../ui/kit'
+import { BoardMeter } from './Finance'
 
 function lineupStrength(game: GameState, clubId: string) {
   const ids = game.clubs[clubId].tactics.lineup.filter((x): x is string => !!x)
@@ -153,6 +157,23 @@ export function HomeScreen({ game }: { game: GameState }) {
           </div>
         </div>
 
+        <a href={href('club/finance')} className="flex shrink-0 flex-col gap-2 rounded-2xl border border-line bg-surface px-4 py-3 text-ink no-underline">
+          <BoardMeter game={game} compact />
+          <div className="flex items-center justify-between text-[12px] text-muted">
+            <span>
+              잔고 <b className={club.budget < 0 ? 'text-warn' : 'text-ink'}>{formatMoney(club.budget)}</b>
+            </span>
+            <span className={windowState(game).open ? 'font-semibold text-accent' : ''}>{windowLabel(game)}</span>
+          </div>
+        </a>
+
+        {game.offers.length > 0 && (
+          <a href={href('club/transfer')} className="flex shrink-0 items-center justify-between rounded-2xl border border-accent/40 bg-accent/8 px-4 py-3 text-ink no-underline">
+            <span className="text-[14px] font-semibold">받은 이적 제안 {game.offers.length}건</span>
+            <IconChevronRight size={18} className="text-accent" />
+          </a>
+        )}
+
         {report && (
           <a href={href('report')} className="flex shrink-0 items-center gap-3 rounded-2xl border border-line bg-surface px-4 py-3 text-ink no-underline">
             <div className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -206,7 +227,7 @@ export function HomeScreen({ game }: { game: GameState }) {
       <Sheet open={menuOpen} onClose={() => setMenuOpen(false)} title="메뉴">
         <div className="flex flex-col gap-2 px-5 pt-1 pb-4">
           <div className="text-[13px] text-muted">
-            {game.managerName} 감독 · 저장 슬롯 {slot !== null ? slot + 1 : '-'} · 자동 저장됨
+            {managerTitle(game.managerName)} · 저장 슬롯 {slot !== null ? slot + 1 : '-'} · 자동 저장됨
           </div>
           <button
             type="button"

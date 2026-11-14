@@ -146,6 +146,7 @@ export interface Club {
   budget: number
   /** First-team squad. */
   playerIds: string[]
+  finance: ClubFinance
   /** Youth academy players (not selectable for matches). */
   youthIds: string[]
   facilities: { training: number; youth: number }
@@ -216,6 +217,59 @@ export interface SeasonRecord {
 
 export type ContractDecision = 'renew' | 'release'
 
+/** Player id prefix-free marker for players without a club. */
+export const FREE_AGENT = 'FA'
+
+export type FinanceCategory =
+  | 'matchday'
+  | 'sponsor'
+  | 'broadcast'
+  | 'prize'
+  | 'sales'
+  | 'wages'
+  | 'upkeep'
+  | 'purchases'
+  | 'facilities'
+  | 'compensation'
+  | 'scouting'
+
+export interface ClubFinance {
+  /** Board-approved spending on transfer fees this season (만원). */
+  transferBudget: number
+  /** Board-approved weekly wage bill (만원). */
+  wageBudget: number
+  /** Income (+) and expenses (−) this season by category. */
+  season: Partial<Record<FinanceCategory, number>>
+  /** Balance after each round this season. */
+  history: number[]
+}
+
+export interface IncomingOffer {
+  id: string
+  playerId: string
+  fromClubId: string
+  fee: number
+  expiresRound: number
+}
+
+export interface NewsItem {
+  season: number
+  round: number
+  text: string
+}
+
+export interface BoardState {
+  /** 0–100. Below 15 the manager is sacked. */
+  confidence: number
+  status: 'ok' | 'sacked'
+  jobOffers: string[]
+}
+
+export interface ScoutTask {
+  playerId: string
+  readyRound: number
+}
+
 export interface GameState {
   version: number
   seed: number
@@ -233,6 +287,16 @@ export interface GameState {
   objective: Objective
   history: SeasonRecord[]
   lastReport: MatchReport | null
+  /** Ids of players without a club. */
+  freeAgents: string[]
+  /** Players the user's scouts have fully assessed. */
+  scouted: string[]
+  scoutQueue: ScoutTask[]
+  /** User players on the transfer list, with asking price. */
+  transferList: Record<string, number>
+  offers: IncomingOffer[]
+  news: NewsItem[]
+  board: BoardState
   nextId: number
   managerName: string
   createdAt: number

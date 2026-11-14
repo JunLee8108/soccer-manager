@@ -8,16 +8,20 @@ import { MatchScreen } from './screens/Match'
 import { MenuScreen } from './screens/Menu'
 import { PlayerScreen } from './screens/Player'
 import { ReportScreen } from './screens/Report'
+import { SackedScreen } from './screens/Sacked'
 import { SeasonScreen } from './screens/Season'
 import { SquadScreen } from './screens/Squad'
 import { TacticsScreen } from './screens/Tactics'
+import { MarketScreen } from './screens/Transfers'
 import { useGame } from './store/gameStore'
 import { BottomNav, type NavKey } from './ui/BottomNav'
+import { Toast } from './ui/Toast'
 
 function Shell({ children }: { children: ReactNode }) {
   return (
     <div className="pt-safe relative mx-auto flex h-dvh w-full max-w-[430px] flex-col overflow-hidden bg-bg md:border-x md:border-line-soft">
       {children}
+      <Toast />
     </div>
   )
 }
@@ -47,9 +51,21 @@ export default function App() {
     )
   }
 
+  if (game.board?.status === 'sacked') {
+    return (
+      <Shell>
+        <SackedScreen game={game} />
+      </Shell>
+    )
+  }
+
   let screen: ReactNode
   let nav: NavKey | null | undefined
   switch (route.name) {
+    case 'market':
+      screen = <MarketScreen game={game} />
+      nav = 'club'
+      break
     case 'squad':
       screen = <SquadScreen game={game} />
       nav = 'squad'

@@ -91,3 +91,9 @@ export const ATTR_LABEL: Record<AttrKey, string> = {
 }
 
 export const FOOT_LABEL: Record<string, string> = { L: '왼발', R: '오른발', B: '양발' }
+
+/** "홍길동 감독", or just "감독" when the default name was kept. */
+export function managerTitle(name: string): string {
+  const n = name.trim()
+  return !n || n === '감독' ? '감독' : `${n} 감독`
+}

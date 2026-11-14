@@ -1,8 +1,13 @@
 import { developPlayer } from './development'
+import { setSeasonBudgets } from './finance'
 import { clubLevel, createPlayer, createYouth, freeShirt, NameFactory, SQUAD_TEMPLATE } from './generator'
 import { ovr, potentialStars, wageFor } from './ratings'
 import { clamp, type Rng } from './rng'
+import { moveToFreeAgents, removePlayer } from './squad'
+import { maintainFreeAgents, signBestFreeAgent } from './transfers'
 import type { Club, ContractDecision, GameState, Player, Position } from './types'
+
+export { removePlayer }
 
 export const MIN_SQUAD = 20
 const AI_TARGET_SQUAD = 23
@@ -44,22 +49,6 @@ export function retirementChance(p: Player): number {
   else if (p.age === 33) chance = 0.12
   if (p.age >= 31 && o < 52) chance += 0.2
   return clamp(chance, 0, 1)
-}
-
-export function removePlayer(game: GameState, id: string) {
-  const p = game.players[id]
-  if (!p) return
-  const club = game.clubs[p.clubId]
-  if (club) {
-    club.playerIds = club.playerIds.filter((x) => x !== id)
-    club.youthIds = club.youthIds.filter((x) => x !== id)
-    club.tactics = {
-      ...club.tactics,
-      lineup: club.tactics.lineup.map((x) => (x === id ? null : x)),
-      bench: club.tactics.bench.filter((x) => x !== id),
-    }
-  }
-  delete game.players[id]
 }
 
 export function promoteYouth(game: GameState, id: string, rng: Rng): boolean {
@@ -137,6 +126,7 @@ export function runOffseason(game: GameState, rng: Rng, decisions: Record<string
   const names = new NameFactory(rng, Object.values(game.players).map((p) => p.name))
   const endingSeason = game.season
   const newSeason = endingSeason + 1
+  const releasedByUser = new Set<string>()
 
   // 1. Pre-season training.
   for (const id of game.clubOrder) {
@@ -148,8 +138,9 @@ export function runOffseason(game: GameState, rng: Rng, decisions: Record<string
     }
   }
 
-  // 2. Everyone gets a year older.
+  // 2. Everyone gets a year older; the free-agent pool is refreshed.
   for (const p of Object.values(game.players)) p.age++
+  maintainFreeAgents(game, rng)
 
   for (const id of game.clubOrder) {
     const club = game.clubs[id]
@@ -180,8 +171,12 @@ export function runOffseason(game: GameState, rng: Rng, decisions: Record<string
         p.contract = { wage: offer.wage, until: newSeason + offer.years - 1 }
         if (isUser) report.renewed.push(p.name)
       } else {
-        if (isUser) report.released.push(p.name)
-        removePlayer(game, pid)
+        if (isUser) {
+          report.released.push(p.name)
+          releasedByUser.add(pid)
+        }
+        if (p.age >= 33) removePlayer(game, pid)
+        else moveToFreeAgents(game, pid)
       }
     }
 
@@ -218,18 +213,20 @@ export function runOffseason(game: GameState, rng: Rng, decisions: Record<string
     // 7. Keep squads playable.
     if (isUser) {
       while (club.playerIds.length < MIN_SQUAD) {
-        const p = signFreeAgent(game, club, rng, names, -5)
+        const p = signBestFreeAgent(game, club, rng, releasedByUser) ?? signFreeAgent(game, club, rng, names, -5)
         report.signed.push(`${p.name} (${p.position})`)
       }
     } else {
-      while (club.playerIds.length < AI_TARGET_SQUAD) signFreeAgent(game, club, rng, names, -3)
+      while (club.playerIds.length < AI_TARGET_SQUAD) {
+        if (!signBestFreeAgent(game, club, rng)) signFreeAgent(game, club, rng, names, -3)
+      }
       if (club.playerIds.length > AI_MAX_SQUAD) {
         const surplus = club.playerIds
           .map((pid) => game.players[pid])
           .filter((p) => p.age >= 27)
           .sort((a, b) => ovr(a) - ovr(b))
           .slice(0, club.playerIds.length - AI_MAX_SQUAD)
-        for (const p of surplus) removePlayer(game, p.id)
+        for (const p of surplus) moveToFreeAgents(game, p.id)
       }
     }
   }
@@ -243,5 +240,6 @@ export function runOffseason(game: GameState, rng: Rng, decisions: Record<string
     p.history = [ovr(p)]
     p.seasonStart = { ...p.attrs }
   }
+  for (const id of game.clubOrder) setSeasonBudgets(game, game.clubs[id])
   return report
 }

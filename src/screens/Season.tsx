@@ -1,3 +1,4 @@
+import { managerTitle } from '../engine/korean'
 import { useState } from 'react'
 import { formatMoney } from '../engine/korean'
 import { expiringPlayers, renewalOffer, suggestedDecision } from '../engine/offseason'
@@ -40,7 +41,7 @@ export function SeasonScreen({ game }: { game: GameState }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <ScreenHeader title={`시즌 ${game.season} 결산`} subtitle={`${game.managerName} 감독 · ${club.name}`} onBack={() => goBack('')} />
+      <ScreenHeader title={`시즌 ${game.season} 결산`} subtitle={`${managerTitle(game.managerName)} · ${club.name}`} onBack={() => goBack('')} />
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
         <div className="flex flex-col gap-3">
         <Card className="flex flex-col items-center gap-2 px-4 py-5 text-center">
@@ -62,7 +63,7 @@ export function SeasonScreen({ game }: { game: GameState }) {
           <div className="flex items-center justify-between gap-3 px-4 py-3.5">
             <span className="shrink-0 text-[13px] text-muted">득점왕</span>
             <span className="truncate text-[14px] font-semibold">
-              {s.topScorer ? `${s.topScorer.name} (${game.clubs[s.topScorer.clubId].short}) · ${s.topScorerGoals}골` : '-'}
+              {s.topScorer ? `${s.topScorer.name} (${game.clubs[s.topScorer.clubId]?.short ?? '자유계약'}) · ${s.topScorerGoals}골` : '-'}
             </span>
           </div>
           <div className="flex items-center justify-between gap-3 px-4 py-3.5">

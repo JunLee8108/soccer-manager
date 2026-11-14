@@ -1,3 +1,4 @@
+import { managerTitle } from '../engine/korean'
 import { useState } from 'react'
 import { CLUB_SEEDS, LEAGUE_NAME } from '../engine/data/clubs'
 import { clubLevel, objectiveFor } from '../engine/generator'
@@ -72,7 +73,7 @@ export function MenuScreen() {
               <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                 <span className="truncate text-[15px] font-bold">{meta.clubName}</span>
                 <span className="truncate text-[12px] text-muted">
-                  {meta.managerName} 감독 · 시즌 {meta.season} · {meta.round === 0 ? '개막 전' : `${meta.round}라운드 진행`}
+                  {managerTitle(meta.managerName)} · 시즌 {meta.season} · {meta.round === 0 ? '개막 전' : `${meta.round}라운드 진행`}
                 </span>
                 <span className="text-[11px] text-muted">슬롯 {slot + 1} · {formatDate(meta.updatedAt)}</span>
               </div>

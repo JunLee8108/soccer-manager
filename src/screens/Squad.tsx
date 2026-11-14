@@ -16,14 +16,17 @@ const SORT_ORDER: SortKey[] = ['ovr', 'pos', 'age', 'condition']
 export function playerFlag(game: GameState, p: Player): { label: string; cls: string } | null {
   if (p.injury) return { label: `부상 ${p.injury.weeks}주`, cls: 'bg-warn/18 text-warn' }
   if (p.suspension > 0) return { label: '출장 정지', cls: 'bg-warn/18 text-warn' }
+  if (p.id in game.transferList) return { label: '판매 중', cls: 'bg-away/16 text-away' }
   if (p.contract.until <= game.season) return { label: '계약 만료 임박', cls: 'bg-caution/16 text-caution' }
   if (p.age <= 21 && potentialStars(p.potential) >= 4) return { label: '유망주', cls: 'bg-accent/16 text-accent' }
   return null
 }
 
 export function roleOf(game: GameState, p: Player): '선발' | '교체' | '명단 외' | '유스' {
-  if (game.clubs[p.clubId].youthIds.includes(p.id)) return '유스'
-  const t = game.clubs[p.clubId].tactics
+  const club = game.clubs[p.clubId]
+  if (!club) return '명단 외'
+  if (club.youthIds.includes(p.id)) return '유스'
+  const t = club.tactics
   if (t.lineup.includes(p.id)) return '선발'
   if (t.bench.includes(p.id)) return '교체'
   return '명단 외'

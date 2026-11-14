@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { LEAGUE_NAME } from '../engine/data/clubs'
 import type { LiveMatch, MatchPlayer, Side, TeamState } from '../engine/match/types'
+import { attendanceFor } from '../engine/finance'
 import { passPct } from '../engine/match/engine'
+import { standingsOf } from '../engine/standings'
 import { isSeasonOver, userFixture } from '../engine/season'
 import type { GameState } from '../engine/types'
 import { navigate } from '../router'
@@ -91,7 +93,8 @@ export function MatchScreen({ game }: { game: GameState }) {
   const userTeam = userSide === 'home' ? match.home : match.away
   const homeColor = userSide === 'home' ? USER_COLOR : OPP_COLOR
   const awayColor = userSide === 'home' ? OPP_COLOR : USER_COLOR
-  const attendance = Math.round((home.capacity * (0.6 + home.reputation / 330)) / 10) * 10
+  const homeRank = game.round === 0 ? null : standingsOf(game).findIndex((r) => r.clubId === home.id) + 1
+  const attendance = attendanceFor(home, homeRank, game.clubOrder.length)
   const halfTime = match.minute === 45 && paused && !match.finished
   const possessor = match.possession === 'home' ? home : away
   const possessorIsUser = match.possession === userSide

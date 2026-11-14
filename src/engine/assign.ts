@@ -8,16 +8,16 @@ export function assignMinCost(cost: number[][]): number[] {
   const m = cost[0].length
   if (n > m) throw new Error('assignMinCost needs rows <= columns')
   const INF = Number.POSITIVE_INFINITY
-  const u = new Array<number>(n + 1).fill(0)
-  const v = new Array<number>(m + 1).fill(0)
-  const p = new Array<number>(m + 1).fill(0)
-  const way = new Array<number>(m + 1).fill(0)
+  const u: number[] = Array.from({ length: n + 1 }, () => 0)
+  const v: number[] = Array.from({ length: m + 1 }, () => 0)
+  const p: number[] = Array.from({ length: m + 1 }, () => 0)
+  const way: number[] = Array.from({ length: m + 1 }, () => 0)
 
   for (let i = 1; i <= n; i++) {
     p[0] = i
     let j0 = 0
-    const minv = new Array<number>(m + 1).fill(INF)
-    const used = new Array<boolean>(m + 1).fill(false)
+    const minv: number[] = Array.from({ length: m + 1 }, () => INF)
+    const used: boolean[] = Array.from({ length: m + 1 }, () => false)
     do {
       used[j0] = true
       const i0 = p[j0]
@@ -52,7 +52,7 @@ export function assignMinCost(cost: number[][]): number[] {
     } while (j0)
   }
 
-  const result = new Array<number>(n).fill(-1)
+  const result: number[] = Array.from({ length: n }, () => -1)
   for (let j = 1; j <= m; j++) if (p[j] !== 0) result[p[j] - 1] = j - 1
   return result
 }

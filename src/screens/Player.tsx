@@ -10,9 +10,11 @@ import { Radar, Sparkline } from '../ui/charts'
 import { IconChevronLeft, IconChevronRight } from '../ui/Icons'
 import { Card, PosBadge, Segmented, Sheet, Stars, attrColor, conditionColor, cx, moraleLabel } from '../ui/kit'
 import { LEVEL_STYLE } from './Club'
+import { OtherPlayerScreen } from './ScoutPlayer'
 import { playerFlag, roleOf } from './Squad'
+import { ContractActionsSheet, NegotiationSheet } from './Transfers'
 
-function attrGroups(p: Player): { title: string; keys: AttrKey[] }[] {
+export function attrGroups(p: Player): { title: string; keys: AttrKey[] }[] {
   const mental: AttrKey[] = ['composure', 'positioning', 'decisions', 'workRate', 'teamwork', 'vision']
   const physical: AttrKey[] = ['pace', 'acceleration', 'stamina', 'strength', 'jumping']
   if (p.position === 'GK') {
@@ -58,11 +60,14 @@ export function PlayerScreen({ game, id }: { game: GameState; id: string }) {
   const [tab, setTab] = useState<Tab>('attrs')
   const [programOpen, setProgramOpen] = useState(false)
   const [confirmRelease, setConfirmRelease] = useState(false)
+  const [contractOpen, setContractOpen] = useState(false)
+  const [renewOpen, setRenewOpen] = useState(false)
   const { setPlayerFocus, promoteYouth, releaseYouth } = useGame.getState()
   const p = game.players[id]
   if (!p) {
     return <div className="flex flex-1 items-center justify-center text-muted">선수를 찾을 수 없습니다.</div>
   }
+  if (p.clubId !== game.userClubId) return <OtherPlayerScreen game={game} p={p} />
   const club = game.clubs[p.clubId]
   const isUser = club.id === game.userClubId
   const isYouth = club.youthIds.includes(p.id)
@@ -344,16 +349,34 @@ export function PlayerScreen({ game, id }: { game: GameState; id: string }) {
               </button>
             </>
           ) : (
-            <button
-              type="button"
-              onClick={() => setProgramOpen(true)}
-              className="col-span-2 h-12 rounded-xl border border-[#2E3F5E] bg-surface-2 text-[14px] font-semibold text-ink"
-            >
-              개인 훈련 설정 · {program.label}
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => setProgramOpen(true)}
+                className="h-12 truncate rounded-xl border border-[#2E3F5E] bg-surface-2 px-2 text-[14px] font-semibold text-ink"
+              >
+                개인 훈련 · {program.label}
+              </button>
+              <button type="button" onClick={() => setContractOpen(true)} className="h-12 rounded-xl border border-[#2E3F5E] bg-surface-2 text-[14px] font-semibold text-ink">
+                계약 · 이적{p.id in game.transferList ? ' (판매 중)' : ''}
+              </button>
+            </>
           )}
         </div>
       )}
+
+      {contractOpen && (
+        <ContractActionsSheet
+          game={game}
+          playerId={p.id}
+          onClose={() => setContractOpen(false)}
+          onRenew={() => {
+            setContractOpen(false)
+            setRenewOpen(true)
+          }}
+        />
+      )}
+      {renewOpen && <NegotiationSheet game={game} playerId={p.id} mode="renew" onClose={() => setRenewOpen(false)} />}
 
       <Sheet open={programOpen} onClose={() => setProgramOpen(false)} title="개인 훈련 프로그램">
         <div className="flex flex-col gap-2 px-5 pt-1 pb-4">

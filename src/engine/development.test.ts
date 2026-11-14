@@ -108,7 +108,9 @@ describe('offseason', () => {
       delete (c as Partial<Club>).facilities
     }
     const m = migrateGame(old)
-    expect(m.version).toBe(2)
+    expect(m.version).toBe(3)
+    expect(m.board.confidence).toBeGreaterThan(0)
+    expect(Array.isArray(m.freeAgents)).toBe(true)
     for (const c of Object.values(m.clubs)) {
       expect(c.youthIds.length).toBeGreaterThan(0)
       expect(c.facilities.training).toBeGreaterThanOrEqual(1)
@@ -144,7 +146,7 @@ describe('offseason', () => {
       g = startNewSeason(g, decisions)
 
       for (const [id, d] of Object.entries(decisions)) {
-        if (d === 'release') expect(g.players[id]).toBeUndefined()
+        if (d === 'release') expect(g.players[id]?.clubId ?? 'gone').not.toBe('hanbit')
         else if (g.players[id]) expect(g.players[id].contract.until).toBeGreaterThanOrEqual(g.season)
       }
       if (oldest > 0 && [...before].some((id) => !g.players[id])) retiredSeen = true

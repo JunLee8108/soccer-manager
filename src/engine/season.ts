@@ -1,6 +1,8 @@
+import { checkSack, seasonEndConfidence, updateConfidence } from './board'
 import { developPlayer } from './development'
+import { attendanceFor, book, prizeMoney, processRoundFinances } from './finance'
 import { emptyStats, objectiveFor } from './generator'
-import { josa } from './korean'
+import { formatMoney, josa } from './korean'
 import { autoLineup, repairTactics } from './lineup'
 import { buildReport, createMatch, simulateToEnd } from './match/engine'
 import type { LiveMatch, Side } from './match/types'
@@ -9,6 +11,7 @@ import { mixSeed, Rng } from './rng'
 import { expiringPlayers, runOffseason } from './offseason'
 import { doubleRoundRobin, roundsCount } from './schedule'
 import { computeStandings, standingsOf, topScorers } from './standings'
+import { aiTransfers, expireOffers, generateOffers, processScouting, windowLabel, windowState } from './transfers'
 import type { ContractDecision, Fixture, GameState, Message, MessageTag, Player } from './types'
 
 /** Minutes and rating per player for the round just played. */
@@ -47,7 +50,7 @@ export function matchSeed(game: GameState, fixture: Fixture): number {
   return mixSeed(game.seed + game.season * 7919, hashString(fixture.id))
 }
 
-function addMessage(game: GameState, tag: MessageTag, title: string, body: string) {
+export function addMessage(game: GameState, tag: MessageTag, title: string, body: string) {
   const msg: Message = { id: `m${game.nextId++}`, season: game.season, round: game.round, tag, title, body, read: false }
   game.inbox = [msg, ...game.inbox].slice(0, MAX_INBOX)
 }
@@ -158,6 +161,7 @@ function applyMatch(game: GameState, fixture: Fixture, m: LiveMatch, fresh: Set<
 function weeklyUpdate(game: GameState, rng: Rng, fresh: Set<string>, apps: Appearances) {
   for (const p of Object.values(game.players)) {
     const club = game.clubs[p.clubId]
+    if (!club) continue
     const isUser = club.id === game.userClubId
     const app = apps.get(p.id)
     developPlayer(
@@ -248,6 +252,10 @@ export function completeRound(input: GameState, userMatch: LiveMatch | null): Ga
   const fresh = new Set<string>()
   const apps: Appearances = new Map()
   const fixtures = roundFixtures(game)
+  const tableBefore = standingsOf(game)
+  const rankBefore = (id: string) => (game.round === 0 ? null : tableBefore.findIndex((r) => r.clubId === id) + 1)
+  const attendance: Record<string, number> = {}
+  let userResult: { result: 'W' | 'D' | 'L'; opponentId: string } | null = null
 
   for (const fixture of fixtures) {
     if (fixture.result) continue
@@ -265,20 +273,64 @@ export function completeRound(input: GameState, userMatch: LiveMatch | null): Ga
       m = simulateToEnd(createMatch(fixture, game, matchSeed(game, fixture), game.userClubId), game)
     }
     const report = applyMatch(game, fixture, m, fresh, apps)
-    if (isUserFixture) game.lastReport = report
+    attendance[fixture.homeId] = attendanceFor(game.clubs[fixture.homeId], rankBefore(fixture.homeId), game.clubOrder.length)
+    if (isUserFixture) {
+      game.lastReport = report
+      const home = fixture.homeId === game.userClubId
+      const my = home ? m.home.goals : m.away.goals
+      const their = home ? m.away.goals : m.home.goals
+      userResult = { result: my > their ? 'W' : my < their ? 'L' : 'D', opponentId: home ? fixture.awayId : fixture.homeId }
+    }
   }
 
   weeklyUpdate(game, rng, fresh, apps)
+  processRoundFinances(game, attendance)
+  const wasOpen = windowState(game).open
   game.round++
-  game.rng = rng.state
+
+  const notify = (tag: MessageTag, title: string, body: string) => addMessage(game, tag, title, body)
+  if (userResult) updateConfidence(game, userResult.result, userResult.opponentId, notify)
+
+  // Transfer market.
+  for (const id of processScouting(game)) {
+    const p = game.players[id]
+    addMessage(game, 'scout', `스카우트 보고서: ${p.name}`, `${p.name}(${p.age}세, ${p.position})의 평가가 끝났습니다. 능력 ${ovr(p)}, 정확한 능력치를 볼 수 있습니다.`)
+  }
+  expireOffers(game)
+  const nowOpen = windowState(game).open
+  if (nowOpen && !wasOpen) addMessage(game, 'board', '이적시장 개장', `${windowLabel(game)}. 클럽 > 이적에서 선수를 찾아보세요.`)
+  if (!nowOpen && wasOpen) addMessage(game, 'board', '이적시장 마감', '이적시장이 닫혔습니다. 자유계약 선수는 언제든 영입할 수 있습니다.')
+  generateOffers(game, rng, (title, body) => addMessage(game, 'scout', title, body))
+  aiTransfers(game, rng)
 
   const total = totalRounds(game)
   if (game.round % 4 === 0) growthReport(game)
   if (game.round === total - 5) contractReminder(game)
   if (game.round === Math.floor(total / 2)) boardReview(game, false)
-  if (game.round >= total) boardReview(game, true)
+  if (game.round >= total) {
+    boardReview(game, true)
+    payPrizes(game)
+    seasonEndConfidence(game, seasonSummary(game).objectiveMet)
+    if (game.board.confidence < 15) checkSack(game, rng, true)
+  } else {
+    checkSack(game, rng)
+  }
+  if (game.board.status === 'sacked') {
+    addMessage(game, 'board', '경질 통보', '이사회가 감독 교체를 결정했습니다. 다른 구단들의 제안을 확인해 보세요.')
+  }
+  game.rng = rng.state
   game.updatedAt = Date.now()
   return game.round >= total ? game : prepareRound(game)
+}
+
+function payPrizes(game: GameState) {
+  const table = standingsOf(game)
+  table.forEach((row, i) => {
+    const club = game.clubs[row.clubId]
+    const prize = prizeMoney(i + 1, table.length)
+    book(club, 'prize', prize)
+    if (club.id === game.userClubId) addMessage(game, 'finance', '시즌 상금 지급', `최종 ${i + 1}위로 상금 ${formatMoney(prize)}를 받았습니다.`)
+  })
 }
 
 export interface SeasonSummary {
@@ -326,9 +378,13 @@ export function startNewSeason(input: GameState, decisions: Record<string, Contr
     },
   ]
   const rng = new Rng(game.rng)
+  processScouting(game, true)
+  game.offers = []
   const report = runOffseason(game, rng, decisions)
   game.season++
   game.round = 0
+  game.board = { ...game.board, confidence: Math.max(40, game.board.confidence) }
+  for (const id of Object.keys(game.transferList)) if (game.players[id]?.clubId !== game.userClubId) delete game.transferList[id]
   for (const p of Object.values(game.players)) p.stats = emptyStats()
   game.fixtures = doubleRoundRobin(game.clubOrder, rng, game.season)
   const byRep = [...game.clubOrder].sort((a, b) => game.clubs[b].reputation - game.clubs[a].reputation)
@@ -350,7 +406,13 @@ export function startNewSeason(input: GameState, decisions: Record<string, Contr
   if (report.youthReleased.length) addMessage(game, 'staff', `유스 방출 ${report.youthReleased.length}명`, `${list(report.youthReleased)} 선수가 1군 수준에 이르지 못해 아카데미를 떠났습니다.`)
   if (report.signed.length) addMessage(game, 'board', `자유계약 영입 ${report.signed.length}명`, `선수단 인원을 채우기 위해 ${list(report.signed)} 선수를 영입했습니다.`)
   if (report.youthIn.length) addMessage(game, 'scout', `유스 입단 ${report.youthIn.length}명`, `새 유망주가 아카데미에 들어왔습니다: ${list(report.youthIn)}. 클럽 > 유스에서 확인하세요.`)
-  addMessage(game, 'board', `시즌 ${game.season} 개막`, `새 시즌이 시작됩니다. 이사회의 목표는 '${game.objective.label}'입니다.`)
+  const fin = game.clubs[game.userClubId].finance
+  addMessage(
+    game,
+    'board',
+    `시즌 ${game.season} 개막`,
+    `새 시즌이 시작됩니다. 이사회의 목표는 '${game.objective.label}'입니다. 이적 예산 ${formatMoney(fin.transferBudget)}, 주급 예산 주당 ${formatMoney(fin.wageBudget)}. ${windowLabel(game)}.`,
+  )
   game.updatedAt = Date.now()
   return prepareRound(game)
 }
