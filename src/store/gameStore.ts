@@ -27,6 +27,9 @@ interface GameStore {
   /** Half-time pause already shown for the current match. */
   halfTimeSeen: boolean
   busy: boolean
+  /** Open the match board automatically at half-time and on injuries. */
+  autoBoard: boolean
+  setAutoBoard(v: boolean): void
 
   init(): Promise<void>
   refreshSaves(): Promise<void>
@@ -61,6 +64,15 @@ interface GameStore {
 
 const repo = createSaveRepository()
 let saveTimer: ReturnType<typeof setTimeout> | null = null
+
+const AUTO_BOARD_KEY = 'soccer-manager:auto-board'
+function readAutoBoard(): boolean {
+  try {
+    return localStorage.getItem(AUTO_BOARD_KEY) !== '0'
+  } catch {
+    return true
+  }
+}
 
 function persist(get: () => GameStore, immediate = false) {
   const run = async () => {
@@ -100,6 +112,16 @@ export const useGame = create<GameStore>((set, get) => {
     paused: false,
     halfTimeSeen: false,
     busy: false,
+    autoBoard: readAutoBoard(),
+
+    setAutoBoard(v) {
+      try {
+        localStorage.setItem(AUTO_BOARD_KEY, v ? '1' : '0')
+      } catch {
+        // preference only
+      }
+      set({ autoBoard: v })
+    },
 
     async init() {
       try {

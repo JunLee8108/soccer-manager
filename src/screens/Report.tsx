@@ -19,6 +19,11 @@ const toRows = (lines: PlayerLine[]): RatingRow[] =>
     yellow: l.yellow,
     sentOff: l.sentOff,
     status: l.sentOff ? 'sentOff' : 'on',
+    shots: l.shots,
+    onTarget: l.onTarget,
+    keyPasses: l.keyPasses,
+    tackles: l.tackles,
+    passPct: l.passPct,
   }))
 
 export function ReportScreen({ game }: { game: GameState }) {

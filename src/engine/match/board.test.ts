@@ -114,3 +114,47 @@ describe('board actions', () => {
     expect(checked).toBeGreaterThan(0)
   })
 })
+
+describe('optimal slot assignment', () => {
+  it('matches brute force on small matrices', async () => {
+    const { assignMinCost } = await import('../assign')
+    const { Rng } = await import('../rng')
+    const rng = new Rng(4)
+    const permute = (cols: number[], k: number): number[][] =>
+      k === 0 ? [[]] : cols.flatMap((c) => permute(cols.filter((x) => x !== c), k - 1).map((rest) => [c, ...rest]))
+    for (let trial = 0; trial < 40; trial++) {
+      const n = rng.int(2, 5)
+      const m = n + rng.int(0, 2)
+      const cost = Array.from({ length: n }, () => Array.from({ length: m }, () => rng.int(0, 50)))
+      const res = assignMinCost(cost)
+      const total = res.reduce((s, j, i) => s + cost[i][j], 0)
+      expect(new Set(res).size).toBe(n)
+      const best = Math.min(...permute([...Array(m).keys()], n).map((perm) => perm.reduce((s, j, i) => s + cost[i][j], 0)))
+      expect(total).toBe(best)
+    }
+  })
+
+  it('keeps natural roles when switching formations back and forth', () => {
+    const m = createMatch(fixture, game, 9, 'hanbit')
+    const original = new Map(m.home.onPitch.map((p) => [p.id, p.pos]))
+    changeFormation(m, game, 'home', '4-2-3-1')
+    // Nobody should end up badly out of position when a fitting slot exists.
+    for (const mp of m.home.onPitch) {
+      const natural = game.players[mp.id].position
+      if (mp.pos !== natural) expect(['DM', 'CM', 'AM', 'LW', 'RW', 'ST', 'LB', 'RB', 'CB']).toContain(mp.pos)
+    }
+    changeFormation(m, game, 'home', '4-3-3')
+    const same = m.home.onPitch.filter((p) => original.get(p.id) === p.pos).length
+    expect(same).toBeGreaterThanOrEqual(10)
+  })
+
+  it('leaves a low-priority slot empty when a player is missing', () => {
+    const m = createMatch(fixture, game, 10, 'hanbit')
+    m.home.onPitch = m.home.onPitch.filter((p) => p.pos !== 'CB' || p !== m.home.onPitch.find((x) => x.pos === 'CB'))
+    expect(m.home.onPitch.length).toBe(10)
+    changeFormation(m, game, 'home', '4-4-2')
+    const filled = new Set(m.home.onPitch.map((p) => FORMATIONS['4-4-2'].slots[p.slot].pos))
+    expect(filled.has('GK')).toBe(true)
+    expect(filled.has('CB')).toBe(true)
+  })
+})

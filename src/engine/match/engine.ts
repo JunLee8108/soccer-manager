@@ -1,4 +1,5 @@
 import { FORMATIONS } from '../data/formations'
+import { assignMinCost } from '../assign'
 import { attackScore, defenseScore, keeperScore, ratingAt, teamStrength, type Strength } from '../ratings'
 import { clamp, Rng } from '../rng'
 import type { Club, FormationId, Fixture, Instructions, Player, Position } from '../types'
@@ -658,6 +659,11 @@ export function liveStrength(m: LiveMatch, ctx: MatchContext, side: Side): Stren
   return strengthOf(team(m, side), ctx, side === 'home')
 }
 
+/** Strength of an arbitrary (possibly hypothetical) team sheet. */
+export function strengthOfTeam(t: TeamState, ctx: MatchContext, isHome: boolean): Strength {
+  return strengthOf(t, ctx, isHome)
+}
+
 function lines(t: TeamState): PlayerLine[] {
   return [...t.onPitch, ...t.off]
     .sort((a, b) => Number(b.started) - Number(a.started) || a.minuteOn - b.minuteOn)
@@ -719,39 +725,31 @@ export function swapPositions(m: LiveMatch, side: Side, idA: string, idB: string
   return true
 }
 
-const SLOT_FILL_ORDER: Position[] = ['GK', 'CB', 'DM', 'CM', 'LB', 'RB', 'ST', 'AM', 'LW', 'RW']
+/** How much it matters to fill a slot when a team is short of players. */
+const SLOT_IMPORTANCE: Record<Position, number> = { GK: 60, CB: 8, DM: 6, CM: 5, LB: 4, RB: 4, ST: 4, AM: 2, LW: 1, RW: 1 }
 
 /**
- * Switch formation mid-match. Players keep their role where the new shape has
- * it, otherwise they move to the slot they suit best. With fewer than eleven
- * players the least important slots stay empty.
+ * Switch formation mid-match. Players are placed so the team as a whole fits
+ * best (optimal assignment); keeping a player in his current role gets a small
+ * bonus. With fewer than eleven players the least important slots stay empty.
  */
 export function changeFormation(m: LiveMatch, ctx: MatchContext, side: Side, formation: FormationId): boolean {
   if (m.finished) return false
   const t = team(m, side)
   const slots = FORMATIONS[formation].slots
-  const order = slots
-    .map((s, i) => ({ i, pri: SLOT_FILL_ORDER.indexOf(s.pos) }))
-    .sort((a, b) => a.pri - b.pri || a.i - b.i)
-    .map((x) => x.i)
-  const pool = [...t.onPitch]
-  for (const i of order) {
-    if (pool.length === 0) break
-    const pos = slots[i].pos
-    let best = 0
-    let bestScore = -Infinity
-    pool.forEach((mp, k) => {
-      const p = ctx.players[mp.id]
-      const score = ratingAt(p, pos) + (mp.pos === pos ? 4 : 0) + (pos === 'GK' && p.position === 'GK' ? 50 : 0)
-      if (score > bestScore) {
-        bestScore = score
-        best = k
-      }
-    })
-    const [mp] = pool.splice(best, 1)
-    mp.slot = i
-    mp.pos = pos
+  const value = (mp: MatchPlayer, pos: Position) => {
+    const p = ctx.players[mp.id]
+    let v = ratingAt(p, pos) + (mp.pos === pos ? 4 : 0) + SLOT_IMPORTANCE[pos]
+    if (pos === 'GK') v += p.position === 'GK' ? 100 : -100
+    return v
   }
+  const cost = t.onPitch.map((mp) => slots.map((s) => 300 - value(mp, s.pos)))
+  const result = assignMinCost(cost)
+  t.onPitch.forEach((mp, i) => {
+    const slot = result[i]
+    mp.slot = slot
+    mp.pos = slots[slot].pos
+  })
   t.formation = formation
   return true
 }

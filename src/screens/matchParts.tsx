@@ -125,6 +125,18 @@ export interface RatingRow {
   yellow: boolean
   sentOff: boolean
   status: 'on' | 'off' | 'sentOff' | 'injured'
+  shots?: number
+  onTarget?: number
+  keyPasses?: number
+  tackles?: number
+  passPct?: number | null
+}
+
+function statLine(r: RatingRow): string | null {
+  if (r.shots === undefined) return null
+  const parts = [`슈팅 ${r.shots}(${r.onTarget ?? 0})`, `키패스 ${r.keyPasses ?? 0}`, `탈취 ${r.tackles ?? 0}`]
+  if (r.passPct !== null && r.passPct !== undefined) parts.push(`패스 ${r.passPct}%`)
+  return parts.join(' · ')
 }
 
 export function RatingsPanel({ rows, game, live }: { rows: RatingRow[]; game: GameState; live: boolean }) {
@@ -142,8 +154,9 @@ export function RatingsPanel({ rows, game, live }: { rows: RatingRow[]; game: Ga
         const p = game.players[r.id]
         const statusLabel = r.status === 'off' ? 'OUT' : r.status === 'sentOff' ? '퇴장' : r.status === 'injured' ? '부상' : null
         return (
-          <div key={r.id} className="grid h-[38px] items-center gap-2 border-t border-line-soft" style={{ gridTemplateColumns: '26px minmax(0,1fr) 76px 46px' }}>
+          <div key={r.id} className="grid min-h-[38px] items-center gap-2 border-t border-line-soft py-1.5" style={{ gridTemplateColumns: '26px minmax(0,1fr) 76px 46px' }}>
             <span className="font-display text-[15px] font-semibold text-muted">{p.shirt}</span>
+            <span className="flex min-w-0 flex-col gap-0.5">
             <span className="flex min-w-0 items-baseline gap-1.5 overflow-hidden whitespace-nowrap">
               <span className={cx('truncate text-[13px] font-semibold', r.status !== 'on' && 'text-muted')}>{p.name}</span>
               <span className="text-[11px] text-muted">{r.pos}</span>
@@ -151,6 +164,8 @@ export function RatingsPanel({ rows, game, live }: { rows: RatingRow[]; game: Ga
               {r.assists > 0 && <span className="text-[11px] font-semibold text-ink-2">{r.assists}도움</span>}
               {r.yellow && !r.sentOff && <span aria-label="경고" className="inline-block h-[11px] w-2 rounded-[1px] bg-caution" />}
               {statusLabel && <span className="text-[10px] font-bold text-warn">{statusLabel}</span>}
+            </span>
+            {statLine(r) && <span className="truncate text-[11px] text-muted">{statLine(r)}</span>}
             </span>
             <span className="flex items-center gap-1.5">
               <span className="flex h-[5px] flex-1 overflow-hidden rounded-[3px] bg-line">
