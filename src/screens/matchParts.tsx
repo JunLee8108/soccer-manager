@@ -169,13 +169,13 @@ export function RatingsPanel({ rows, game, live }: { rows: RatingRow[]; game: Ga
   )
 }
 
-export function scorerLine(events: MatchEvent[], side: Side, game: GameState): string {
+export function scorerLine(events: MatchEvent[], side: Side, game: GameState): string[] {
   const map = new Map<string, number[]>()
   for (const e of events) {
     if (e.type !== 'goal' || e.side !== side || !e.playerId) continue
     map.set(e.playerId, [...(map.get(e.playerId) ?? []), e.minute])
   }
-  return [...map.entries()].map(([id, mins]) => `${game.players[id]?.name ?? ''} ${mins.map((m) => `${m}'`).join(' ')}`).join(', ')
+  return [...map.entries()].map(([id, mins]) => `${game.players[id]?.name ?? ''} ${mins.map((m) => `${m}'`).join(' ')}`)
 }
 
 export function Scoreboard({
@@ -194,8 +194,8 @@ export function Scoreboard({
   awayGoals: number
   status: string
   live: boolean
-  homeScorers: string
-  awayScorers: string
+  homeScorers: string[]
+  awayScorers: string[]
 }) {
   return (
     <section aria-label={`스코어 ${home.name} ${homeGoals} 대 ${awayGoals} ${away.name}`} className="flex shrink-0 flex-col gap-2.5 rounded-[18px] border border-line bg-surface px-3 pt-3.5 pb-3">
@@ -220,16 +220,18 @@ export function Scoreboard({
           <span className="text-[13px] font-semibold">{away.name}</span>
         </div>
       </div>
-      {(homeScorers || awayScorers) && (
+      {(homeScorers.length > 0 || awayScorers.length > 0) && (
         <div className="grid grid-cols-2 gap-3 border-t border-line-soft pt-2.5 text-[12px] text-muted">
-          <div className="flex items-start justify-center gap-1.5 text-center">
-            {homeScorers && <IconBall size={14} className="mt-0.5 shrink-0" />}
-            <span>{homeScorers}</span>
-          </div>
-          <div className="flex items-start justify-center gap-1.5 text-center">
-            {awayScorers && <IconBall size={14} className="mt-0.5 shrink-0" />}
-            <span>{awayScorers}</span>
-          </div>
+          {[homeScorers, awayScorers].map((list, i) => (
+            <ul key={i} className="m-0 flex list-none flex-col items-center gap-0.5 p-0">
+              {list.map((line) => (
+                <li key={line} className="flex max-w-full items-center gap-1.5">
+                  <IconBall size={13} className="shrink-0" />
+                  <span className="truncate">{line}</span>
+                </li>
+              ))}
+            </ul>
+          ))}
         </div>
       )}
     </section>
